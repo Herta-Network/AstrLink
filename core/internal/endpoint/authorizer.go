@@ -113,6 +113,14 @@ func (authorizer *ServiceAuthorizer) Headers(ctx context.Context, endpoint contr
 			// Every Factory call presents the Droid CLI, whatever the caller;
 			// providerapi.DroidRequest drops the caller's other headers.
 			accountauth.ApplyDroidAPIHeaders(headers, tokens)
+		case contract.ServiceKindKiroSubscription:
+			if accountauth.ClientClassFrom(ctx) == accountauth.ClientClassConverted {
+				clientHeaders = nil
+			}
+			accountauth.ApplyKiroForwardHeaders(headers, tokens, clientHeaders, authorizer.identities.KiroIdentity(settings), settings.KiroIdentityEnforcement)
+			if settings.SubscriptionSessionIsolation {
+				headers.Set(providerapi.KiroSessionHeader, string(endpoint.ID)+":"+tokens.OAuthClientID)
+			}
 		case contract.ServiceKindClaudeSubscription:
 			if official {
 				accountauth.ApplyClaudeOfficialForwardHeaders(headers, tokens, clientHeaders)

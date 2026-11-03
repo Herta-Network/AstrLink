@@ -25,11 +25,11 @@
     "plan_types": {
       "type": "array",
       "minItems": 3,
-      "maxItems": 3,
+      "maxItems": 4,
       "items": {
         "$ref": "#/$defs/PlanTypeCapability"
       },
-      "description": "Exactly one native, delegated, and relaykit declaration. RelayKit is represented for forward compatibility but explicitly unavailable in Alpha."
+      "description": "One native, delegated and relaykit declaration, plus an optional built-in provider adapter declaration. Alpha semantics remain frozen."
     },
     "conversion_engine": {
       "$ref": "#/$defs/ConversionEngineCapability"
@@ -107,8 +107,8 @@
     },
     "PlanType": {
       "type": "string",
-      "enum": ["native", "delegated", "relaykit"],
-      "description": "native preserves the protocol, delegated lets a capable gateway perform conversion, and relaykit performs explicit local conversion."
+      "enum": ["native", "delegated", "relaykit", "adapter"],
+      "description": "native and delegated preserve the gateway boundary protocol; relaykit converts standard protocols; adapter translates a standard format to a provider-specific wire."
     },
     "PlanTypeCapability": {
       "type": "object",
@@ -171,6 +171,26 @@
             "properties": {
               "id": {
                 "const": "relaykit"
+              }
+            },
+            "required": ["id"]
+          },
+          "then": {
+            "properties": {
+              "available_in_alpha": {
+                "const": false
+              },
+              "uses_local_conversion": {
+                "const": true
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "id": {
+                "const": "adapter"
               }
             },
             "required": ["id"]
@@ -380,8 +400,8 @@
         },
         "mode": {
           "type": "string",
-          "enum": ["native", "delegated"],
-          "description": "Legacy passthrough label. native and delegated both forward ingress bytes unchanged; new writes use native. Local conversion is convert_to."
+          "enum": ["native", "delegated", "adapter"],
+          "description": "native/delegated preserve the protocol; adapter selects a built-in provider wire adapter. convert_to is an optional preceding standard-format conversion."
         },
         "streaming": {
           "type": "boolean",
@@ -389,7 +409,7 @@
         },
         "convert_to": {
           "$ref": "#/$defs/ProtocolId",
-          "description": "When set, AstrLink converts this ingress protocol to the named upstream protocol locally. Omitted means passthrough."
+          "description": "Optional standard-format conversion target. For adapter mode it is the adapter input format; omission does not imply passthrough."
         }
       },
       "additionalProperties": false,
@@ -453,10 +473,14 @@
           "items": {
             "$ref": "#/$defs/ConversionEdge"
           },
-          "description": "Ordered local conversion edges. Native and delegated plans use an empty array."
+          "description": "Standard-format conversion edges, ending at upstream_protocol for RelayKit or adapter_input_protocol for a provider adapter."
         },
         "conversion_quality": {
           "$ref": "#/$defs/ConversionQuality"
+        },
+        "adapter_input_protocol": {
+          "$ref": "#/$defs/ProtocolId",
+          "description": "Standard intermediate format consumed by the adapter. upstream_protocol names the actual provider destination."
         }
       },
       "additionalProperties": false,
@@ -477,15 +501,68 @@
                 "minItems": 1
               }
             }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "plan_type": {
+                "enum": ["native", "delegated"]
+              }
+            },
+            "required": ["plan_type"]
           },
-          "else": {
+          "then": {
             "properties": {
               "conversion_path": {
                 "maxItems": 0
               },
-              "conversion_quality": {
-                "not": {}
+              "conversion_quality": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "plan_type": {
+                "const": "adapter"
               }
+            },
+            "required": ["plan_type"]
+          },
+          "then": {
+            "required": ["adapter_input_protocol"],
+            "properties": {
+              "adapter_input_protocol": {
+                "enum": ["anthropic.messages", "openai.models"]
+              },
+              "upstream_protocol": {
+                "enum": ["kiro.generate_assistant_response", "local.models"]
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "conversion_path": {
+                      "minItems": 1
+                    }
+                  }
+                },
+                "then": {
+                  "required": ["conversion_quality"]
+                },
+                "else": {
+                  "properties": {
+                    "conversion_quality": false
+                  }
+                }
+              }
+            ]
+          },
+          "else": {
+            "properties": {
+              "adapter_input_protocol": false
             }
           }
         }
@@ -724,109 +801,159 @@
       "type": "object",
       "required": ["id", "phase"],
       "properties": {
-        "id": { "const": "openai.responses" },
-        "phase": { "const": "alpha" }
+        "id": {
+          "const": "openai.responses"
+        },
+        "phase": {
+          "const": "alpha"
+        }
       }
     },
     "ProtocolIdConstraintOpenaiResponsesCompact": {
       "type": "object",
       "required": ["id", "phase"],
       "properties": {
-        "id": { "const": "openai.responses.compact" },
-        "phase": { "const": "alpha" }
+        "id": {
+          "const": "openai.responses.compact"
+        },
+        "phase": {
+          "const": "alpha"
+        }
       }
     },
     "ProtocolIdConstraintAnthropicMessages": {
       "type": "object",
       "required": ["id", "phase"],
       "properties": {
-        "id": { "const": "anthropic.messages" },
-        "phase": { "const": "alpha" }
+        "id": {
+          "const": "anthropic.messages"
+        },
+        "phase": {
+          "const": "alpha"
+        }
       }
     },
     "ProtocolIdConstraintGoogleGenerateContent": {
       "type": "object",
       "required": ["id", "phase"],
       "properties": {
-        "id": { "const": "google.generate_content" },
-        "phase": { "const": "alpha" }
+        "id": {
+          "const": "google.generate_content"
+        },
+        "phase": {
+          "const": "alpha"
+        }
       }
     },
     "ProtocolIdConstraintOpenaiChat": {
       "type": "object",
       "required": ["id", "phase"],
       "properties": {
-        "id": { "const": "openai.chat" },
-        "phase": { "const": "alpha" }
+        "id": {
+          "const": "openai.chat"
+        },
+        "phase": {
+          "const": "alpha"
+        }
       }
     },
     "ProtocolIdConstraintOpenaiCompletions": {
       "type": "object",
       "required": ["id", "phase"],
       "properties": {
-        "id": { "const": "openai.completions" },
-        "phase": { "const": "alpha" }
+        "id": {
+          "const": "openai.completions"
+        },
+        "phase": {
+          "const": "alpha"
+        }
       }
     },
     "ProtocolIdConstraintOpenaiModels": {
       "type": "object",
       "required": ["id", "phase"],
       "properties": {
-        "id": { "const": "openai.models" },
-        "phase": { "const": "alpha" }
+        "id": {
+          "const": "openai.models"
+        },
+        "phase": {
+          "const": "alpha"
+        }
       }
     },
     "ProtocolIdConstraintGoogleModels": {
       "type": "object",
       "required": ["id", "phase"],
       "properties": {
-        "id": { "const": "google.models" },
-        "phase": { "const": "alpha" }
+        "id": {
+          "const": "google.models"
+        },
+        "phase": {
+          "const": "alpha"
+        }
       }
     },
     "ProtocolIdConstraintOpenaiEmbeddings": {
       "type": "object",
       "required": ["id", "phase"],
       "properties": {
-        "id": { "const": "openai.embeddings" },
-        "phase": { "const": "alpha" }
+        "id": {
+          "const": "openai.embeddings"
+        },
+        "phase": {
+          "const": "alpha"
+        }
       }
     },
     "ProtocolIdConstraintGoogleEmbeddings": {
       "type": "object",
       "required": ["id", "phase"],
       "properties": {
-        "id": { "const": "google.embeddings" },
-        "phase": { "const": "alpha" }
+        "id": {
+          "const": "google.embeddings"
+        },
+        "phase": {
+          "const": "alpha"
+        }
       }
     },
     "ProtocolIdConstraintRerank": {
       "type": "object",
       "required": ["id", "phase"],
       "properties": {
-        "id": { "const": "rerank" },
-        "phase": { "const": "alpha" }
+        "id": {
+          "const": "rerank"
+        },
+        "phase": {
+          "const": "alpha"
+        }
       }
     },
     "PlanTypeNative": {
       "type": "object",
       "required": ["id"],
       "properties": {
-        "id": { "const": "native" }
+        "id": {
+          "const": "native"
+        }
       }
     },
     "PlanTypeDelegated": {
       "type": "object",
       "required": ["id"],
       "properties": {
-        "id": { "const": "delegated" }
+        "id": {
+          "const": "delegated"
+        }
       }
     },
     "PlanTypeRelayKit": {
       "type": "object",
       "required": ["id"],
       "properties": {
-        "id": { "const": "relaykit" }
+        "id": {
+          "const": "relaykit"
+        }
       }
     }
   }

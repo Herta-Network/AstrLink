@@ -2456,6 +2456,192 @@ describe("ServiceManager", () => {
     expect(dialog?.textContent).not.toContain("OpenAI");
   });
 
+  it("creates a Kiro subscription and opens the AWS Builder ID device dialog", async () => {
+    const service: Service = {
+      ...copilotService,
+      id: "service_kiro",
+      name: "Kiro",
+      kind: "kiro_subscription",
+      capabilities: [
+        { protocol: "anthropic.messages", mode: "native", streaming: true },
+        { protocol: "openai.models", mode: "native", streaming: false },
+      ],
+      subscription: { provider: "kiro", status: "disconnected" },
+    };
+    const session = {
+      ...copilotSession,
+      id: "authorization_kiro",
+      provider: "kiro",
+      service_id: service.id,
+      device_code: {
+        verification_url: "https://view.awsapps.com/start?user_code=KIRO-TEST",
+        user_code: "KIRO-TEST",
+      },
+    };
+    bridgeMocks.createService.mockResolvedValue({ service, etag });
+    bridgeMocks.beginServiceAuthorization.mockResolvedValue({
+      kind: "session",
+      session,
+    });
+    bridgeMocks.getServiceAuthorization.mockResolvedValue(session);
+    await act(async () =>
+      root.render(
+        <ServiceManager
+          catalogError={null}
+          catalogStatus="ready"
+          isReady
+          onDirtyChange={() => {}}
+          onRefresh={() => {}}
+          onServiceRemoved={() => {}}
+          onServiceSaved={() => {}}
+          onViewChange={() => {}}
+          protocols={[]}
+          services={[]}
+          view={{ kind: "create", serviceKind: "codex_subscription" }}
+        />,
+      ),
+    );
+    await chooseServiceKind("Kiro 订阅");
+    expect(
+      container.querySelector<HTMLInputElement>("#service-name")?.value,
+    ).toBe("Kiro");
+    expect(container.textContent).toContain("AWS Builder ID");
+    await act(async () =>
+      container
+        .querySelector("form")!
+        .dispatchEvent(
+          new Event("submit", { bubbles: true, cancelable: true }),
+        ),
+    );
+    expect(bridgeMocks.createService).toHaveBeenCalledWith({
+      name: "Kiro",
+      kind: "kiro_subscription",
+      enabled: true,
+      responses_websocket_enabled: false,
+      models: [],
+    });
+    expect(bridgeMocks.beginServiceAuthorization).toHaveBeenCalledWith(
+      "service_kiro",
+      "device_code",
+    );
+    await act(async () =>
+      root.render(
+        <ServiceManager
+          catalogError={null}
+          catalogStatus="ready"
+          isReady
+          onDirtyChange={() => {}}
+          onRefresh={() => {}}
+          onServiceRemoved={() => {}}
+          onServiceSaved={() => {}}
+          onViewChange={() => {}}
+          protocols={[]}
+          services={[service]}
+          view={{ kind: "list" }}
+        />,
+      ),
+    );
+    const dialog = [...document.querySelectorAll('[role="dialog"]')].find(
+      (item) => item.textContent?.includes("KIRO-TEST"),
+    );
+    expect(dialog?.textContent).toContain("AWS");
+    expect(dialog?.textContent).not.toContain("OpenAI");
+  });
+
+  it.each(["social", "iam_sso"] as const)(
+    "creates a Kiro %s account with its sign-in options",
+    async (method) => {
+      const service: Service = {
+        ...copilotService,
+        id: "service_kiro",
+        name: "Kiro",
+        kind: "kiro_subscription",
+        subscription: { provider: "kiro", status: "disconnected" },
+      };
+      const session = {
+        ...copilotSession,
+        provider: "kiro",
+        service_id: service.id,
+        flow: method === "social" ? "browser" : "device_code",
+        authorization_url: "https://app.kiro.dev/signin",
+      };
+      bridgeMocks.createService.mockResolvedValue({ service, etag });
+      bridgeMocks.beginServiceAuthorization.mockResolvedValue({
+        kind: "session",
+        session,
+      });
+      bridgeMocks.getServiceAuthorization.mockResolvedValue(session);
+      await act(async () =>
+        root.render(
+          <ServiceManager
+            catalogError={null}
+            catalogStatus="ready"
+            isReady
+            onDirtyChange={() => {}}
+            onRefresh={() => {}}
+            onServiceRemoved={() => {}}
+            onServiceSaved={() => {}}
+            onViewChange={() => {}}
+            protocols={[]}
+            services={[]}
+            view={{ kind: "create", serviceKind: "kiro_subscription" }}
+          />,
+        ),
+      );
+      const label =
+        method === "social" ? "Google / GitHub" : "AWS IAM Identity Center";
+      await act(async () =>
+        container
+          .querySelector<HTMLButtonElement>(
+            `[role="radio"][aria-label="${label}"]`,
+          )!
+          .click(),
+      );
+      const submit = async () => {
+        await act(async () => {
+          container
+            .querySelector("form")!
+            .dispatchEvent(
+              new Event("submit", { bubbles: true, cancelable: true }),
+            );
+        });
+      };
+      if (method === "iam_sso") {
+        await submit();
+        expect(bridgeMocks.createService).not.toHaveBeenCalled();
+        const fill = async (placeholder: string, value: string) => {
+          const input = container.querySelector<HTMLInputElement>(
+            `input[placeholder="${placeholder}"]`,
+          )!;
+          await act(async () => {
+            Object.getOwnPropertyDescriptor(
+              HTMLInputElement.prototype,
+              "value",
+            )!.set!.call(input, value);
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+          });
+        };
+        await fill(
+          "https://your-organization.awsapps.com/start",
+          "https://company.awsapps.com/start",
+        );
+        await fill("us-east-1", "eu-west-1");
+      }
+      await submit();
+      expect(bridgeMocks.beginServiceAuthorization).toHaveBeenCalledWith(
+        "service_kiro",
+        method === "social" ? "browser" : "device_code",
+        method === "social"
+          ? { method: "social" }
+          : {
+              method: "iam_sso",
+              region: "eu-west-1",
+              start_url: "https://company.awsapps.com/start",
+            },
+      );
+    },
+  );
+
   it("confirms the Droid account risk before creating and signing in", async () => {
     const droidService: Service = {
       ...copilotService,
@@ -6981,6 +7167,93 @@ describe("ServiceManager", () => {
       container.querySelector('[data-testid="service-editor-tab-panel"]')
         ?.className,
     ).toContain("overflow-y-auto");
+  });
+
+  it("presents Kiro entries as adaptation and saves adapter-mode conversions", async () => {
+    const capabilities: Service["capabilities"] = [
+      { protocol: "anthropic.messages", mode: "adapter", streaming: true },
+      { protocol: "openai.models", mode: "adapter", streaming: false },
+    ];
+    const listed: Service = {
+      ...codexService,
+      id: "service_kiro",
+      name: "Kiro",
+      kind: "kiro_subscription",
+      capabilities,
+      subscription: { provider: "kiro", status: "disconnected" },
+    };
+    bridgeMocks.getService.mockResolvedValue({ service: listed, etag });
+    bridgeMocks.updateService.mockResolvedValue({ service: listed, etag });
+    await act(async () =>
+      root.render(
+        <ServiceManager
+          catalogError={null}
+          catalogStatus="ready"
+          conversionEngine={{
+            name: "relaykit",
+            version: "v0.1.1",
+            available: true,
+            edges: [
+              {
+                from: "openai.chat",
+                to: "anthropic.messages",
+                quality: "fair",
+                streaming: true,
+              },
+            ],
+          }}
+          isReady
+          onDirtyChange={() => {}}
+          onRefresh={() => {}}
+          onServiceRemoved={() => {}}
+          onServiceSaved={() => {}}
+          onViewChange={() => {}}
+          protocols={[]}
+          services={[listed]}
+          view={{ kind: "edit", serviceId: listed.id }}
+        />,
+      ),
+    );
+    await openEditorTab("protocols");
+    const panel = container.querySelector(
+      '[role="tabpanel"][data-state="active"]',
+    )!;
+    expect(panel.textContent).toContain("Kiro GenerateAssistantResponse");
+    expect(panel.textContent).toContain("适配为 Kiro 协议");
+    expect(panel.textContent).toContain("本地提供模型列表");
+    expect(panel.textContent).not.toContain("订阅原生支持");
+    expect(panel.textContent).not.toContain("原样转发");
+    const chat = [
+      ...panel.querySelectorAll<HTMLElement>(
+        '[data-testid="service-capability-row"]',
+      ),
+    ].find((row) => row.textContent?.includes("OpenAI Chat Completions"))!;
+    await act(async () =>
+      chat.querySelector<HTMLButtonElement>('[role="switch"]')!.click(),
+    );
+    expect(chat.textContent).toContain("→ Kiro");
+    await act(async () => {
+      container
+        .querySelector("form")!
+        .dispatchEvent(
+          new Event("submit", { bubbles: true, cancelable: true }),
+        );
+    });
+    expect(bridgeMocks.updateService).toHaveBeenCalledWith(
+      listed.id,
+      etag,
+      expect.objectContaining({
+        capabilities: [
+          ...capabilities,
+          {
+            protocol: "openai.chat",
+            mode: "adapter",
+            streaming: true,
+            convert_to: "anthropic.messages",
+          },
+        ],
+      }),
+    );
   });
 
   it("limits Codex subscription conversions to Responses egress", async () => {

@@ -4,7 +4,8 @@ export type SubscriptionProvider =
   | "xai_grok"
   | "antigravity"
   | "github_copilot"
-  | "factory_droid";
+  | "factory_droid"
+  | "kiro";
 
 export type SubscriptionStatus =
   | "disconnected"
@@ -28,6 +29,12 @@ export type AuthorizationFlow =
 
 /** How a Claude subscription signs in; mirrors contract.SubscriptionMode. */
 export type SubscriptionMode = "legacy" | "official";
+
+export interface KiroAuthorization {
+  method: "builder_id" | "social" | "iam_sso";
+  region?: string;
+  start_url?: string;
+}
 
 export interface SubscriptionError {
   code: string;
@@ -74,6 +81,7 @@ const providers = new Set<SubscriptionProvider>([
   "antigravity",
   "github_copilot",
   "factory_droid",
+  "kiro",
 ]);
 
 /** Login transports each provider accepts; mirrors contract.AuthorizationFlow.SupportedBy. */
@@ -87,6 +95,7 @@ export const providerAuthorizationFlows: Record<
   antigravity: ["browser"],
   github_copilot: ["device_code"],
   factory_droid: ["device_code"],
+  kiro: ["device_code", "browser", "authorization_code"],
 };
 
 export function flowSupportedByProvider(

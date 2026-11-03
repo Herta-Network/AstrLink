@@ -120,10 +120,11 @@ type Resolved struct {
 	BaseURL       string
 	Mode          contract.CapabilityMode
 	// PlanType is explicit for converted candidates. An empty value retains the
-	// Mode-derived native/delegated behavior.
+	// Mode-derived forwarding or provider-adapter behavior.
 	PlanType contract.PlanType
-	// UpstreamProtocol is the protocol the selected endpoint receives. Empty
-	// retains the ingress protocol.
+	// UpstreamProtocol is the standard format to prepare for the transport. For
+	// provider adapters this is their input, not the final wire named in the
+	// ExecutionPlan. Empty retains the ingress protocol.
 	UpstreamProtocol contract.ProtocolID
 	// UpstreamModel is the model id sent upstream. Ingress rewrites the
 	// request's model only when it differs from the client's; empty keeps the

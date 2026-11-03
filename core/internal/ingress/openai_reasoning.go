@@ -26,7 +26,7 @@ var (
 )
 
 func supportsOpenAIReasoningRecovery(plan contract.ExecutionPlan, model string) bool {
-	if plan.Type == contract.PlanTypeRelayKit || plan.InputProtocol != plan.UpstreamProtocol {
+	if plan.UsesRelayKit() || plan.InputProtocol != plan.ProcessingProtocol() {
 		return false
 	}
 	if plan.InputProtocol != contract.ProtocolOpenAIResponses && plan.InputProtocol != contract.ProtocolOpenAIResponsesCompact {

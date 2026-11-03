@@ -34,7 +34,7 @@ func TestClaudeCodeCancellationExpiryAndConcurrentExchange(t *testing.T) {
 					persisted.Add(1)
 					return nil
 				})
-			session, err := manager.Begin(context.Background(), "service_claude", contract.AuthorizationFlowCode)
+			session, err := manager.Begin(context.Background(), "service_claude", contract.AuthorizationFlowCode, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

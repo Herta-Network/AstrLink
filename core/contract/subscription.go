@@ -47,12 +47,13 @@ const (
 	// authorized through the Droid CLI's public WorkOS client (device code).
 	// Requests present the Droid CLI, the only client Factory serves.
 	SubscriptionProviderFactoryDroid SubscriptionProvider = "factory_droid"
+	SubscriptionProviderKiro         SubscriptionProvider = "kiro"
 )
 
 func (provider SubscriptionProvider) Valid() bool {
 	switch provider {
 	case SubscriptionProviderOpenAICodex, SubscriptionProviderClaudeCode, SubscriptionProviderXAIGrok,
-		SubscriptionProviderAntigravity, SubscriptionProviderGitHubCopilot, SubscriptionProviderFactoryDroid:
+		SubscriptionProviderAntigravity, SubscriptionProviderGitHubCopilot, SubscriptionProviderFactoryDroid, SubscriptionProviderKiro:
 		return true
 	default:
 		return false
@@ -71,6 +72,8 @@ func (provider SubscriptionProvider) ServiceKind() ServiceKind {
 		return ServiceKindCopilotSubscription
 	case SubscriptionProviderFactoryDroid:
 		return ServiceKindDroidSubscription
+	case SubscriptionProviderKiro:
+		return ServiceKindKiroSubscription
 	default:
 		return ServiceKindCodexSubscription
 	}
@@ -78,6 +81,11 @@ func (provider SubscriptionProvider) ServiceKind() ServiceKind {
 
 func (provider SubscriptionProvider) Capabilities() []Capability {
 	switch provider {
+	case SubscriptionProviderKiro:
+		return []Capability{
+			{Protocol: ProtocolAnthropicMessages, Mode: CapabilityModeAdapter, Streaming: true},
+			{Protocol: ProtocolOpenAIModels, Mode: CapabilityModeAdapter},
+		}
 	case SubscriptionProviderClaudeCode:
 		return []Capability{
 			{Protocol: ProtocolAnthropicMessages, Mode: CapabilityModeNative, Streaming: true},
@@ -105,7 +113,7 @@ func (provider SubscriptionProvider) Capabilities() []Capability {
 // an extra ingress protocol is valid only when it converts into one of these.
 func (provider SubscriptionProvider) ConversionTargets() []ProtocolID {
 	switch provider {
-	case SubscriptionProviderClaudeCode:
+	case SubscriptionProviderClaudeCode, SubscriptionProviderKiro:
 		return []ProtocolID{ProtocolAnthropicMessages}
 	case SubscriptionProviderXAIGrok:
 		return []ProtocolID{ProtocolOpenAIResponses, ProtocolOpenAIChat}
@@ -118,9 +126,14 @@ func (provider SubscriptionProvider) ConversionTargets() []ProtocolID {
 	}
 }
 
-// ValidateCapabilities accepts the provider's fixed native capabilities, in any
-// order, plus native-mode local conversions into ConversionTargets.
+// ValidateCapabilities accepts fixed client-facing capabilities plus optional
+// conversions to the provider's standard processing format. Kiro entries use
+// adapter mode because their final wire is not an Anthropic protocol.
 func (provider SubscriptionProvider) ValidateCapabilities(capabilities []Capability) error {
+	label := "native"
+	if provider == SubscriptionProviderKiro {
+		label = "adapter"
+	}
 	native := provider.Capabilities()
 	matched := make([]bool, len(native))
 	targets := provider.ConversionTargets()
@@ -134,12 +147,16 @@ func (provider SubscriptionProvider) ValidateCapabilities(capabilities []Capabil
 				}
 			}
 			if !found {
-				return fmt.Errorf("capabilities[%d]: subscription native capabilities are fixed by provider", index)
+				return fmt.Errorf("capabilities[%d]: subscription %s capabilities are fixed by provider", index, label)
 			}
 			continue
 		}
-		if capability.Mode != CapabilityModeNative {
-			return fmt.Errorf("capabilities[%d]: subscription conversions must use native mode", index)
+		expectedMode := CapabilityModeNative
+		if provider == SubscriptionProviderKiro {
+			expectedMode = CapabilityModeAdapter
+		}
+		if capability.Mode != expectedMode {
+			return fmt.Errorf("capabilities[%d]: subscription conversions must use %s mode", index, expectedMode)
 		}
 		if !slices.Contains(targets, capability.ConvertTo) {
 			names := make([]string, 0, len(targets))
@@ -154,7 +171,7 @@ func (provider SubscriptionProvider) ValidateCapabilities(capabilities []Capabil
 	}
 	for nativeIndex, found := range matched {
 		if !found {
-			return fmt.Errorf("subscription native capability %q is required", native[nativeIndex].Protocol)
+			return fmt.Errorf("subscription %s capability %q is required", label, native[nativeIndex].Protocol)
 		}
 	}
 	return nil
@@ -488,6 +505,8 @@ func (flow AuthorizationFlow) SupportedBy(provider SubscriptionProvider) bool {
 	switch provider {
 	case SubscriptionProviderClaudeCode:
 		return flow == AuthorizationFlowCode || flow == AuthorizationFlowClaudeCLI
+	case SubscriptionProviderKiro:
+		return flow == AuthorizationFlowDeviceCode || flow == AuthorizationFlowBrowser || flow == AuthorizationFlowCode
 	case SubscriptionProviderXAIGrok, SubscriptionProviderGitHubCopilot, SubscriptionProviderFactoryDroid:
 		return flow == AuthorizationFlowDeviceCode
 	case SubscriptionProviderAntigravity:

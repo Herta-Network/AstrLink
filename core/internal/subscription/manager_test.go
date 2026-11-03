@@ -47,6 +47,7 @@ func TestBeginAuthorizationUsesOfficialPublicClientByDefault(t *testing.T) {
 		context.Background(),
 		account.ID,
 		contract.AuthorizationFlowBrowser,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("BeginAuthorization() = %v", err)
@@ -242,6 +243,7 @@ func TestUnavailableCredentialStoreFailsClosed(t *testing.T) {
 		context.Background(),
 		account.ID,
 		contract.AuthorizationFlowBrowser,
+		nil,
 	)
 	if err == nil {
 		t.Fatal("BeginAuthorization() expected credential store failure")
@@ -538,7 +540,7 @@ func TestFailedAuthorizationRollbackPreservesConcurrentInvalidGrant(t *testing.T
 
 	authorizationDone := make(chan error, 1)
 	go func() {
-		_, err := manager.BeginAuthorization(ctx, account.ID, contract.AuthorizationFlowDeviceCode)
+		_, err := manager.BeginAuthorization(ctx, account.ID, contract.AuthorizationFlowDeviceCode, nil)
 		authorizationDone <- err
 	}()
 	waitForManagerInvalidation(t, manager, account.ID)
@@ -690,7 +692,7 @@ func TestAuthorizationSessionLimitAndDuplicateConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, id := range ids[:3] {
-		if _, err := manager.BeginAuthorization(ctx, id, contract.AuthorizationFlowDeviceCode); err != nil {
+		if _, err := manager.BeginAuthorization(ctx, id, contract.AuthorizationFlowDeviceCode, nil); err != nil {
 			t.Fatalf("BeginAuthorization(%s) = %v", id, err)
 		}
 		id := id
@@ -700,6 +702,7 @@ func TestAuthorizationSessionLimitAndDuplicateConflict(t *testing.T) {
 		ctx,
 		ids[0],
 		contract.AuthorizationFlowDeviceCode,
+		nil,
 	); err == nil || !strings.Contains(err.Error(), "already active") {
 		t.Fatalf("duplicate BeginAuthorization() = %v, want active-session conflict", err)
 	}
@@ -707,6 +710,7 @@ func TestAuthorizationSessionLimitAndDuplicateConflict(t *testing.T) {
 		ctx,
 		ids[3],
 		contract.AuthorizationFlowDeviceCode,
+		nil,
 	); err == nil || !strings.Contains(err.Error(), "too many authorization sessions") {
 		t.Fatalf("fourth BeginAuthorization() = %v, want max-three conflict", err)
 	}

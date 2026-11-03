@@ -2540,17 +2540,17 @@ impl CoreManager {
         &self,
         service_id: &str,
         flow: &str,
+        kiro: Option<serde_json::Value>,
     ) -> Result<serde_json::Value, String> {
         validate_resource_id(service_id)?;
         validate_authorization_flow(flow)?;
+        let mut input = serde_json::json!({ "flow": flow });
+        if let Some(options) = kiro {
+            input["kiro"] = options;
+        }
         let path = format!("{SERVICES_PATH}/{service_id}/authorization");
         let (status, body) = self
-            .authenticated_control_status(
-                Method::POST,
-                &path,
-                Some(serde_json::json!({ "flow": flow })),
-                None,
-            )
+            .authenticated_control_status(Method::POST, &path, Some(input), None)
             .await?;
         if status != reqwest::StatusCode::ACCEPTED {
             return Err(control_status_error(&Method::POST, &path, status, &body));
@@ -5083,6 +5083,7 @@ const SUBSCRIPTION_PROVIDERS: &[&str] = &[
     "antigravity",
     "github_copilot",
     "factory_droid",
+    "kiro",
 ];
 const AUTHORIZATION_SESSION_STATUSES: &[&str] =
     &["pending", "completed", "cancelled", "expired", "failed"];
@@ -5275,7 +5276,10 @@ fn parse_authorization_session_value(
         .ok_or_else(|| "authorization session omitted flow".to_string())?;
     validate_authorization_flow(flow)?;
 
-    if (provider == "claude_code") != (flow == "authorization_code" || flow == "claude_cli") {
+    if (provider == "claude_code" && flow != "authorization_code" && flow != "claude_cli")
+        || (provider != "claude_code"
+            && (flow == "claude_cli" || (flow == "authorization_code" && provider != "kiro")))
+    {
         return Err("authorization flow is unsupported by provider".to_string());
     }
     if provider == "antigravity" && flow != "browser" {
@@ -6003,8 +6007,18 @@ fn verify_capabilities(capabilities: &CapabilitiesResponse) -> Result<(), String
         ("delegated", true, false),
         ("relaykit", false, true),
     ];
-    if capabilities.plan_types.len() != expected_plans.len() {
-        return Err("Core returned an unexpected Alpha plan registry".to_string());
+    let adapters: Vec<_> = capabilities
+        .plan_types
+        .iter()
+        .filter(|plan| plan.id == "adapter")
+        .collect();
+    if adapters.len() > 1
+        || adapters
+            .iter()
+            .any(|plan| plan.available_in_alpha || !plan.uses_local_conversion)
+        || capabilities.plan_types.len() != expected_plans.len() + adapters.len()
+    {
+        return Err("Core returned an unexpected plan registry".to_string());
     }
     for (id, available, local_conversion) in expected_plans {
         let matches: Vec<_> = capabilities
@@ -6536,6 +6550,22 @@ mod tests {
         copilot_browser["provider"] = serde_json::json!("github_copilot");
         assert!(parse_authorization_session_value(&copilot_browser).is_err());
 
+        let mut kiro_browser = browser.clone();
+        kiro_browser["provider"] = serde_json::json!("kiro");
+        kiro_browser["authorization_url"] =
+            serde_json::json!("https://app.kiro.dev/signin?state=public-state");
+        assert!(parse_authorization_session_value(&kiro_browser).is_ok());
+        kiro_browser["flow"] = serde_json::json!("authorization_code");
+        assert!(parse_authorization_session_value(&kiro_browser).is_ok());
+        kiro_browser["code_verifier"] = serde_json::json!("private-verifier");
+        assert!(parse_authorization_session_value(&kiro_browser).is_err());
+        let mut kiro = device.clone();
+        kiro["provider"] = serde_json::json!("kiro");
+        kiro["device_code"]["verification_url"] =
+            serde_json::json!("https://view.awsapps.com/start");
+        assert!(parse_authorization_session_value(&kiro).is_ok());
+        kiro["flow"] = serde_json::json!("browser");
+        assert!(parse_authorization_session_value(&kiro).is_err());
         let mut droid = device.clone();
         droid["provider"] = serde_json::json!("factory_droid");
         droid["device_code"]["verification_url"] =
@@ -7333,6 +7363,30 @@ mod tests {
         let error = verify_contract(&ready, &version, &capabilities)
             .expect_err("unsupported but internally consistent versions must fail");
         assert!(error.contains("unsupported"));
+    }
+
+    #[test]
+    fn provider_adapter_registry_is_explicit_without_changing_alpha_semantics() {
+        let mut capabilities = alpha_capabilities();
+        capabilities.plan_types.push(PlanTypeCapability {
+            id: "adapter".into(),
+            available_in_alpha: false,
+            uses_local_conversion: true,
+        });
+        assert!(verify_capabilities(&capabilities).is_ok());
+        capabilities
+            .plan_types
+            .last_mut()
+            .unwrap()
+            .uses_local_conversion = false;
+        assert!(verify_capabilities(&capabilities).is_err());
+        capabilities
+            .plan_types
+            .last_mut()
+            .unwrap()
+            .uses_local_conversion = true;
+        capabilities.plan_types.last_mut().unwrap().id = "unknown".into();
+        assert!(verify_capabilities(&capabilities).is_err());
     }
 
     #[test]

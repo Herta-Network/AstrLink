@@ -33,6 +33,9 @@ const (
 	// gateway answers them with its own search tool, so no provider declares
 	// it and it has no descriptor.
 	ProtocolOpenAISearch ProtocolID = "openai.search"
+	// Provider-only destinations, never exposed as ingress endpoints.
+	ProtocolKiroAssistant ProtocolID = "kiro.generate_assistant_response"
+	ProtocolLocalModels   ProtocolID = "local.models"
 )
 
 type ProtocolPhase string

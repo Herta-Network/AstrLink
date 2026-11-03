@@ -4828,7 +4828,7 @@ components:
         thinking_signature_recovery:
           type: boolean
           default: true
-          description: On a recognized Claude Messages thinking signature HTTP 400, repair assistant history and resend immediately to the same target. All request repairs share one repair per target, independent of failover strategy, max_retries, backoff and HTTP error rules, but count toward max_attempts. Manual paths repair within the current step without consuming a later step. Failed repairs follow ordinary error rules. Omission enables recovery; false disables it.
+          description: On a recognized Claude Messages thinking signature HTTP 400, repair assistant history and resend immediately to the same target. Kiro Messages-compatible ingress also uses this switch when the local adapter rejects signed or encrypted thinking history; repair runs before a network send and the repaired text is inspected by the privacy policy again. All request repairs share one repair per target, independent of failover strategy, max_retries, backoff and HTTP error rules, but count toward max_attempts. Manual paths repair within the current step without consuming a later step. Failed repairs follow ordinary error rules. Omission enables recovery; false disables it.
         openai_reasoning_recovery:
           type: boolean
           default: true
@@ -5010,13 +5010,15 @@ components:
         usage: { type: [object, "null"], additionalProperties: true }
     ClientIdentities:
       type: object
-      required: [codex, claude, grok]
+      required: [codex, claude, grok, kiro]
       properties:
         codex:
           $ref: "#/components/schemas/ClientIdentityStatus"
         claude:
           $ref: "#/components/schemas/ClientIdentityStatus"
         grok:
+          $ref: "#/components/schemas/ClientIdentityStatus"
+        kiro:
           $ref: "#/components/schemas/ClientIdentityStatus"
       additionalProperties: false
     ClientIdentityStatus:
@@ -5057,6 +5059,10 @@ components:
           type: boolean
           default: true
           description: Use the resolved Grok shell identity, raising its version from the version header or Grok User-Agent when newer. When disabled, preserve recognized Grok client identities with a matching version header.
+        kiro_identity_enforcement:
+          type: boolean
+          default: true
+          description: Use the resolved Kiro IDE identity with matching User-Agent and X-Amz-User-Agent versions. When disabled, preserve a recognized matching client pair; unknown or converted clients use the resolved identity.
         subscription_risk_protection:
           type: boolean
           default: true
@@ -5085,6 +5091,10 @@ components:
           type: boolean
           default: true
           description: Learn newer versions from recognized Grok CLI requests and persist them for forwarding, model discovery, connection tests, OAuth and usage requests. Never learn below the built-in baseline. When disabled, ignore learned versions and stop learning.
+        kiro_identity_auto_learn:
+          type: boolean
+          default: true
+          description: Learn newer versions from recognized Kiro IDE requests and persist them for forwarding, model discovery, connection tests, OAuth and usage requests. Never learn below the built-in baseline. When disabled, ignore learned versions and stop learning.
         codex_identity_auto_learn:
           type: boolean
           default: true
@@ -5092,6 +5102,8 @@ components:
         claude_identity_version:
           $ref: "#/components/schemas/ClientIdentityVersion"
         grok_identity_version:
+          $ref: "#/components/schemas/ClientIdentityVersion"
+        kiro_identity_version:
           $ref: "#/components/schemas/ClientIdentityVersion"
         codex_identity_version:
           $ref: "#/components/schemas/CodexIdentityVersion"
@@ -5214,6 +5226,8 @@ components:
           type: boolean
         grok_identity_enforcement:
           type: boolean
+        kiro_identity_enforcement:
+          type: boolean
         subscription_risk_protection:
           type: boolean
         codex_request_normalization:
@@ -5230,12 +5244,19 @@ components:
           type: boolean
         grok_identity_auto_learn:
           type: boolean
+        kiro_identity_auto_learn:
+          type: boolean
         claude_identity_version:
           description: An empty string removes the override; null is rejected.
           oneOf:
             - $ref: "#/components/schemas/ClientIdentityVersion"
             - { type: string, const: "" }
         grok_identity_version:
+          description: An empty string removes the override; null is rejected.
+          oneOf:
+            - $ref: "#/components/schemas/ClientIdentityVersion"
+            - { type: string, const: "" }
+        kiro_identity_version:
           description: An empty string removes the override; null is rejected.
           oneOf:
             - $ref: "#/components/schemas/ClientIdentityVersion"
@@ -5299,8 +5320,8 @@ components:
     ServicePackageId:
       type: string
       maxLength: 104
-      pattern: "^(?:service:[a-z][a-z0-9_-]{2,95}|subscription:(?:codex|claude|grok|antigravity|copilot|droid):\\S(?:.*\\S)?)$"
-      description: service:<service_id> for a single service, or subscription:<provider>:<plan> for subscription accounts, where provider is codex, claude, grok, antigravity, copilot or droid and plan is the lowercase plan key, up to 64 characters, or unknown.
+      pattern: "^(?:service:[a-z][a-z0-9_-]{2,95}|subscription:(?:codex|claude|grok|antigravity|copilot|droid|kiro):\\S(?:.*\\S)?)$"
+      description: service:<service_id> for a single service, or subscription:<provider>:<plan> for subscription accounts, where provider is codex, claude, grok, antigravity, copilot, droid or kiro and plan is the lowercase plan key, up to 64 characters, or unknown.
       examples:
         [
           "subscription:claude:max_20x",
@@ -5338,6 +5359,7 @@ components:
               antigravity,
               github_copilot,
               factory_droid,
+              kiro,
             ]
           description: Subscription provider. Present only for subscription packages.
         plan_type:
@@ -5406,6 +5428,7 @@ components:
         - antigravity_subscription
         - copilot_subscription
         - droid_subscription
+        - kiro_subscription
         - opencode_go
         - opencode_zen
         - kimi_coding
@@ -5488,6 +5511,7 @@ components:
               antigravity,
               github_copilot,
               factory_droid,
+              kiro,
             ]
         status:
           type: string
@@ -5609,7 +5633,7 @@ components:
         model_protocols:
           type: array
           maxItems: 2000
-          description: The format this service is called in for each listed model, sorted by model. A request entering on openai.responses, anthropic.messages, openai.chat or google.generate_content for that model is converted to the format, or passes through when it already uses it; the format needs no capability of its own, and capabilities only decide which clients may enter. Other entry protocols keep their capability. A model is looked up after this service's redirects. A model without an entry follows its capability's own pass-through or convert_to, except that opencode_go, opencode_zen, copilot_subscription and droid_subscription give every model a built-in format, which an entry here replaces. Subscriptions accept only their conversion targets. Vertex accepts Gemini, Messages and Chat formats; unpinned Vertex models follow the entry configuration. An empty array clears the table.
+          description: The standard processing format for each listed model, sorted by model. For Kiro this is the adapter input; the actual upstream is Kiro GenerateAssistantResponse. A request entering on openai.responses, anthropic.messages, openai.chat or google.generate_content for that model is converted to the format, or passes through when it already uses it; the format needs no capability of its own, and capabilities only decide which clients may enter. Other entry protocols keep their capability. A model is looked up after this service's redirects. A model without an entry follows its capability's own pass-through or convert_to, except that opencode_go, opencode_zen, copilot_subscription and droid_subscription give every model a built-in format, which an entry here replaces. Subscriptions accept only their conversion targets. Vertex accepts Gemini, Messages and Chat formats; unpinned Vertex models follow the entry configuration. An empty array clears the table.
           items:
             $ref: "#/components/schemas/ModelProtocol"
         failure_policy:
@@ -5655,6 +5679,7 @@ components:
                   antigravity_subscription,
                   copilot_subscription,
                   droid_subscription,
+                  kiro_subscription,
                 ]
           required: [subscription]
           not:
@@ -5704,7 +5729,7 @@ components:
         model_protocols:
           type: array
           maxItems: 2000
-          description: The format this service is called in for each listed model, sorted by model. A request entering on openai.responses, anthropic.messages, openai.chat or google.generate_content for that model is converted to the format, or passes through when it already uses it; the format needs no capability of its own, and capabilities only decide which clients may enter. Other entry protocols keep their capability. A model is looked up after this service's redirects. A model without an entry follows its capability's own pass-through or convert_to, except that opencode_go, opencode_zen, copilot_subscription and droid_subscription give every model a built-in format, which an entry here replaces. Subscriptions accept only their conversion targets. Vertex accepts Gemini, Messages and Chat formats; unpinned Vertex models follow the entry configuration. An empty array clears the table.
+          description: The standard processing format for each listed model, sorted by model. For Kiro this is the adapter input; the actual upstream is Kiro GenerateAssistantResponse. A request entering on openai.responses, anthropic.messages, openai.chat or google.generate_content for that model is converted to the format, or passes through when it already uses it; the format needs no capability of its own, and capabilities only decide which clients may enter. Other entry protocols keep their capability. A model is looked up after this service's redirects. A model without an entry follows its capability's own pass-through or convert_to, except that opencode_go, opencode_zen, copilot_subscription and droid_subscription give every model a built-in format, which an entry here replaces. Subscriptions accept only their conversion targets. Vertex accepts Gemini, Messages and Chat formats; unpinned Vertex models follow the entry configuration. An empty array clears the table.
           items:
             $ref: "#/components/schemas/ModelProtocol"
         failure_policy:
@@ -5747,6 +5772,7 @@ components:
                   antigravity_subscription,
                   copilot_subscription,
                   droid_subscription,
+                  kiro_subscription,
                 ]
           not:
             required: [http]
@@ -5801,7 +5827,7 @@ components:
         model_protocols:
           type: array
           maxItems: 2000
-          description: The format this service is called in for each listed model, sorted by model. A request entering on openai.responses, anthropic.messages, openai.chat or google.generate_content for that model is converted to the format, or passes through when it already uses it; the format needs no capability of its own, and capabilities only decide which clients may enter. Other entry protocols keep their capability. A model is looked up after this service's redirects. A model without an entry follows its capability's own pass-through or convert_to, except that opencode_go, opencode_zen, copilot_subscription and droid_subscription give every model a built-in format, which an entry here replaces. Subscriptions accept only their conversion targets. Vertex accepts Gemini, Messages and Chat formats; unpinned Vertex models follow the entry configuration. An empty array clears the table.
+          description: The standard processing format for each listed model, sorted by model. For Kiro this is the adapter input; the actual upstream is Kiro GenerateAssistantResponse. A request entering on openai.responses, anthropic.messages, openai.chat or google.generate_content for that model is converted to the format, or passes through when it already uses it; the format needs no capability of its own, and capabilities only decide which clients may enter. Other entry protocols keep their capability. A model is looked up after this service's redirects. A model without an entry follows its capability's own pass-through or convert_to, except that opencode_go, opencode_zen, copilot_subscription and droid_subscription give every model a built-in format, which an entry here replaces. Subscriptions accept only their conversion targets. Vertex accepts Gemini, Messages and Chat formats; unpinned Vertex models follow the entry configuration. An empty array clears the table.
           items:
             $ref: "#/components/schemas/ModelProtocol"
         failure_policy:
@@ -9653,7 +9679,7 @@ components:
     AuthorizationFlow:
       type: string
       enum: [browser, device_code, authorization_code, claude_cli]
-      description: Codex supports browser and device_code. Legacy Claude Code accounts support authorization_code with PKCE and a manual code#state callback; official ones support claude_cli only, where Core runs `claude auth login --claudeai` in the account's config directory, authorization_url is the sign-in page the CLI shows (on a desktop the CLI also opens it and finishes by itself), and the code that page shows is submitted with completeServiceAuthorization. Grok (xai_grok) supports device_code only (RFC 8628 against auth.x.ai). Antigravity supports browser authorization with Google OAuth and a loopback callback. GitHub Copilot (github_copilot) supports device_code only (RFC 8628 against github.com with the OpenCode OAuth app). Factory Droid (factory_droid) supports device_code only (RFC 8628 against WorkOS with the Droid CLI's public client).
+      description: Codex supports browser and device_code. Legacy Claude Code accounts support authorization_code with PKCE and a manual code#state callback; official ones support claude_cli only, where Core runs `claude auth login --claudeai` in the account's config directory, authorization_url is the sign-in page the CLI shows (on a desktop the CLI also opens it and finishes by itself), and the code that page shows is submitted with completeServiceAuthorization. Grok (xai_grok) supports device_code only (RFC 8628 against auth.x.ai). Antigravity supports browser authorization with Google OAuth and a loopback callback. GitHub Copilot (github_copilot) supports device_code only (RFC 8628 against github.com with the OpenCode OAuth app). Factory Droid (factory_droid) supports device_code only (RFC 8628 against WorkOS with the Droid CLI's public client). Kiro (kiro) supports Builder ID device_code, Google/GitHub browser login through the Kiro portal, and IAM Identity Center browser or device_code login with a Start URL and AWS region. authorization_code accepts the complete Kiro callback URL for manual or remote completion; the server edition uses it when a loopback callback cannot reach Core.
     ClaudeCLIStatus:
       type: object
       required:
@@ -9682,12 +9708,34 @@ components:
         install_error:
           type: string
           description: Why the last install failed; cleared by the next one.
+    KiroAuthorization:
+      type: object
+      required: [method]
+      additionalProperties: false
+      properties:
+        method:
+          type: string
+          enum: [builder_id, social, iam_sso]
+          description: social opens the Kiro portal for Google or GitHub. iam_sso uses AWS IAM Identity Center.
+        region:
+          type: string
+          maxLength: 40
+          default: us-east-1
+          pattern: "^[a-z]{2}(?:-[a-z0-9]+)+-[0-9]+$"
+          description: OIDC authentication region; the service region is resolved separately from the profile ARN.
+        start_url:
+          type: string
+          format: uri
+          maxLength: 2048
+          description: Required for iam_sso; an HTTPS organization Start URL without credentials, query or fragment.
     AuthorizationStartRequest:
       type: object
       required: [flow]
       properties:
         flow:
           $ref: "#/components/schemas/AuthorizationFlow"
+        kiro:
+          $ref: "#/components/schemas/KiroAuthorization"
       additionalProperties: false
     AuthorizationDeviceCode:
       type: object
@@ -9727,6 +9775,7 @@ components:
               antigravity,
               github_copilot,
               factory_droid,
+              kiro,
             ]
         status:
           type: string

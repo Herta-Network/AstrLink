@@ -159,7 +159,7 @@ func (handler *Handler) executeCandidatesWithTest(
 	compression := imageCompressionFrom(routingSettings)
 	haiku := claudeCodeHaikuRequest(detectClientType(request.Header), classified.Model)
 	// Each official client identity is learned at most once per request.
-	learnedClaude, learnedCodex, learnedGrok := false, false, false
+	learnedClaude, learnedCodex, learnedGrok, learnedKiro := false, false, false, false
 	repairedTargets := map[string][]byte{}
 	var last executionFailure
 	var lastNetworkFailure executionFailure
@@ -232,7 +232,7 @@ func (handler *Handler) executeCandidatesWithTest(
 				Edges: handler.conversionEngine.Edges(),
 			})
 		} else {
-			plan, planErr = planner.BuildAlpha(planner.AlphaInput{
+			plan, planErr = planner.BuildDirect(planner.AlphaInput{
 				Service: candidate.Service, Protocol: classified.Protocol, Mode: mode, Streaming: classified.Streaming,
 			})
 		}
@@ -266,7 +266,7 @@ func (handler *Handler) executeCandidatesWithTest(
 		}
 
 		candidate.RequestedModel = classified.Model
-		candidate.UpstreamProtocol = plan.UpstreamProtocol
+		candidate.UpstreamProtocol = plan.ProcessingProtocol()
 		repairTarget := recoveryTargetKey(candidate)
 		attemptRequest, ok, bodyErr := body.Next(request.Context())
 		if bodyErr != nil || !ok {
@@ -290,7 +290,7 @@ func (handler *Handler) executeCandidatesWithTest(
 
 		// A redirect rewrites only the request's model, and only when it differs
 		// from the client's; the response keeps the upstream's model name.
-		if plan.Type != contract.PlanTypeRelayKit && upstreamModel != classified.Model {
+		if !plan.UsesRelayKit() && upstreamModel != classified.Model {
 			rewritten, rewriteErr := rewriteRequestModel(
 				attemptRequest,
 				classified,
@@ -338,7 +338,7 @@ func (handler *Handler) executeCandidatesWithTest(
 		// conversion belongs to this attempt only: its state must reach this
 		// attempt's response conversion and never a retry's.
 		var conversion relaykitbridge.ConvertRequestOutput
-		if plan.Type == contract.PlanTypeRelayKit {
+		if plan.UsesRelayKit() {
 			convertedInput, readErr := io.ReadAll(attemptRequest.Body)
 			if readErr != nil {
 				finishPrivacy()
@@ -348,12 +348,26 @@ func (handler *Handler) executeCandidatesWithTest(
 				continue
 			}
 			_ = attemptRequest.Body.Close()
+			var kiroDocuments providerapi.KiroDocumentConversion
+			if candidate.Service.Kind == contract.ServiceKindKiroSubscription {
+				var documentErr error
+				convertedInput, kiroDocuments, documentErr = providerapi.PrepareKiroDocuments(plan.InputProtocol, convertedInput)
+				if documentErr != nil {
+					finishPrivacy()
+					last = executionFailure{kind: executionFailureConversionUnsupported, err: documentErr, endpointID: candidate.Service.ID}
+					records.noteCandidateRejected(last.endpointID, last.code())
+					continue
+				}
+			}
 			var convertErr error
 			conversion, convertErr = handler.conversionEngine.ConvertRequest(request.Context(), relaykitbridge.ConvertRequestInput{
-				From: plan.InputProtocol, To: plan.UpstreamProtocol, ContentType: attemptRequest.Header.Get("Content-Type"),
+				From: plan.InputProtocol, To: plan.ProcessingProtocol(), ContentType: attemptRequest.Header.Get("Content-Type"),
 				Body: convertedInput, PublicModel: classified.Model, UpstreamModel: upstreamModel, Streaming: classified.Streaming,
 			})
-			if convertErr != nil || adaptRelayKitRequest(attemptRequest, plan.UpstreamProtocol, classified.Streaming, upstreamModel, conversion.Body) != nil {
+			if convertErr == nil && len(kiroDocuments) > 0 {
+				conversion.Body, convertErr = kiroDocuments.Restore(conversion.Body)
+			}
+			if convertErr != nil || adaptRelayKitRequest(attemptRequest, plan.ProcessingProtocol(), classified.Streaming, upstreamModel, conversion.Body) != nil {
 				finishPrivacy()
 				last = executionFailure{kind: executionFailureConversionUnsupported, err: convertErr, endpointID: candidate.Service.ID}
 				records.noteCandidateRejected(last.endpointID, last.code())
@@ -369,9 +383,9 @@ func (handler *Handler) executeCandidatesWithTest(
 		var images imageCompressionResult
 		if test == nil && loopback == nil {
 			var rewriteErr error
-			reasoning, rewriteErr = handler.applyGatewayRewrite(attemptRequest, plan.UpstreamProtocol, rewrite, haiku)
+			reasoning, rewriteErr = handler.applyGatewayRewrite(attemptRequest, plan.ProcessingProtocol(), rewrite, haiku)
 			if rewriteErr == nil {
-				images, rewriteErr = handler.applyImageCompression(attemptRequest, plan.UpstreamProtocol, compression)
+				images, rewriteErr = handler.applyImageCompression(attemptRequest, plan.ProcessingProtocol(), compression)
 			}
 			if rewriteErr != nil {
 				finishPrivacy()
@@ -390,8 +404,8 @@ func (handler *Handler) executeCandidatesWithTest(
 		clientClass := accountauth.ClientClassUnknown
 		codexForcedStream := false
 		if candidate.Service.Kind == contract.ServiceKindCodexSubscription &&
-			(plan.UpstreamProtocol == contract.ProtocolOpenAIResponses || plan.UpstreamProtocol == contract.ProtocolOpenAIResponsesCompact) {
-			converted := plan.Type == contract.PlanTypeRelayKit
+			(plan.ProcessingProtocol() == contract.ProtocolOpenAIResponses || plan.ProcessingProtocol() == contract.ProtocolOpenAIResponsesCompact) {
+			converted := plan.UsesRelayKit()
 			// A converted request never teaches or keeps a client identity.
 			recognized := !converted && (protection.officialPassthrough || protection.codexAutoLearn) &&
 				accountauth.RecognizedCodexOfficialClient(attemptRequest.Header)
@@ -415,7 +429,7 @@ func (handler *Handler) executeCandidatesWithTest(
 				if protection.sessionIsolation {
 					options.sessionScope = candidate.Service.ID
 				}
-				forced, err := prepareCodexSubscriptionRequest(attemptRequest, plan.UpstreamProtocol, options)
+				forced, err := prepareCodexSubscriptionRequest(attemptRequest, plan.ProcessingProtocol(), options)
 				if err != nil {
 					finishPrivacy()
 					kind := executionFailureConfiguration
@@ -431,7 +445,7 @@ func (handler *Handler) executeCandidatesWithTest(
 			// The backend rejects a replayed hosted web search without a declared
 			// web_search tool, whichever client sent it; compaction has its own
 			// wire shape.
-			if protection.codexRequests && plan.UpstreamProtocol == contract.ProtocolOpenAIResponses {
+			if protection.codexRequests && plan.ProcessingProtocol() == contract.ProtocolOpenAIResponses {
 				if err := declareCodexWebSearchHistory(attemptRequest); err != nil {
 					finishPrivacy()
 					last = executionFailure{kind: executionFailureConfiguration, err: err, endpointID: candidate.Service.ID}
@@ -441,9 +455,9 @@ func (handler *Handler) executeCandidatesWithTest(
 			}
 		}
 
-		if candidate.Service.Kind == contract.ServiceKindClaudeSubscription && plan.UpstreamProtocol == contract.ProtocolAnthropicMessages &&
+		if candidate.Service.Kind == contract.ServiceKindClaudeSubscription && plan.ProcessingProtocol() == contract.ProtocolAnthropicMessages &&
 			!official {
-			converted := plan.Type == contract.PlanTypeRelayKit
+			converted := plan.UsesRelayKit()
 			official := false
 			if !converted && (protection.officialPassthrough || protection.claudeAutoLearn) &&
 				accountauth.RecognizedClaudeOfficialHeaders(attemptRequest.Header) {
@@ -484,11 +498,19 @@ func (handler *Handler) executeCandidatesWithTest(
 			}
 		}
 		if candidate.Service.Kind == contract.ServiceKindGrokSubscription {
-			if plan.Type == contract.PlanTypeRelayKit {
+			if plan.UsesRelayKit() {
 				clientClass = accountauth.ClientClassConverted
 			} else if protection.grokAutoLearn && !learnedGrok {
 				learnedGrok = true
 				handler.learnClientIdentity(request.Context(), contract.SubscriptionProviderXAIGrok, attemptRequest.Header)
+			}
+		}
+		if candidate.Service.Kind == contract.ServiceKindKiroSubscription {
+			if plan.UsesRelayKit() {
+				clientClass = accountauth.ClientClassConverted
+			} else if protection.kiroAutoLearn && !learnedKiro {
+				learnedKiro = true
+				handler.learnClientIdentity(request.Context(), contract.SubscriptionProviderKiro, attemptRequest.Header)
 			}
 		}
 		records.noteCodexOfficial(clientClass == accountauth.ClientClassOfficial)
@@ -511,7 +533,7 @@ func (handler *Handler) executeCandidatesWithTest(
 			// The CLI's own credential goes upstream unchanged.
 			headers = http.Header{"Authorization": loopback.authorization}
 		} else if authorizeErr == nil && !official {
-			authorizationEndpoint.Auth = providerapi.Auth(candidate.Service.Kind, plan.UpstreamProtocol, authorizationEndpoint.Auth)
+			authorizationEndpoint.Auth = providerapi.Auth(candidate.Service.Kind, plan.ProcessingProtocol(), authorizationEndpoint.Auth)
 			var headersErr error
 			headers, headersErr = handler.authorizer.Headers(proxyContext, authorizationEndpoint, attemptRequest.Header)
 			authorizeErr = headersErr
@@ -551,8 +573,8 @@ func (handler *Handler) executeCandidatesWithTest(
 			}
 			continue
 		}
-		baseURL = providerapi.BaseURL(candidate.Service.Kind, plan.UpstreamProtocol, baseURL)
-		attemptRequest.URL = providerapi.RequestURL(candidate.Service.Kind, plan.UpstreamProtocol, attemptRequest.URL)
+		baseURL = providerapi.BaseURL(candidate.Service.Kind, plan.ProcessingProtocol(), baseURL)
+		attemptRequest.URL = providerapi.RequestURL(candidate.Service.Kind, plan.ProcessingProtocol(), attemptRequest.URL)
 		if candidate.Service.Kind == contract.ServiceKindCodexSubscription {
 			attemptRequest.URL.Path = strings.TrimPrefix(attemptRequest.URL.Path, "/v1")
 			if attemptRequest.URL.RawPath != "" {
@@ -623,7 +645,7 @@ func (handler *Handler) executeCandidatesWithTest(
 			)
 			outWriter = restoring
 		}
-		if plan.Type == contract.PlanTypeRelayKit {
+		if plan.UsesRelayKit() {
 			attemptRequest.Header.Del("Accept-Encoding")
 			relayWriter, planErr = newRelayKitResponseWriter(
 				outWriter, handler.conversionEngine, plan, classified.Model, upstreamModel, conversion.State,
@@ -696,7 +718,7 @@ func (handler *Handler) executeCandidatesWithTest(
 		// Antigravity wraps its stream in an envelope the transport removes
 		// only after them.
 		holdStart := test == nil && body.Replayable() && responsesWSTurnFromContext(request.Context()) == nil &&
-			candidate.Service.Kind != contract.ServiceKindAntigravitySubscription && holdsStreamStart(plan.UpstreamProtocol)
+			candidate.Service.Kind != contract.ServiceKindAntigravitySubscription && candidate.Service.Kind != contract.ServiceKindKiroSubscription && holdsStreamStart(plan.ProcessingProtocol())
 		if holdStart && classified.Streaming {
 			// The hold reads events as they arrive, which a compressed stream hides.
 			attemptRequest.Header.Del("Accept-Encoding")
@@ -705,7 +727,7 @@ func (handler *Handler) executeCandidatesWithTest(
 		var startErr error
 		var responseRetryAfter time.Duration
 		coolOverload := func(event []byte, retryAfter time.Duration) time.Duration {
-			if limiter == nil || !streamFailureOverloaded(plan.UpstreamProtocol, event) {
+			if limiter == nil || !streamFailureOverloaded(plan.ProcessingProtocol(), event) {
 				return retryAfter
 			}
 			duration := max(streamOverloadCooldown, retryAfter, time.Duration(policy.InitialDelayMS)*time.Millisecond)
@@ -716,7 +738,7 @@ func (handler *Handler) executeCandidatesWithTest(
 			if holdStart && holdsStreamResponse(status, header) {
 				// The response has started; only the client waits for the hold.
 				startWriter.markStarted(status)
-				body, startFailure, startErr = holdStreamStart(attemptRequest.Context(), body, plan.UpstreamProtocol)
+				body, startFailure, startErr = holdStreamStart(attemptRequest.Context(), body, plan.ProcessingProtocol())
 			}
 			if test != nil && test.observer.WrapResponseBody != nil {
 				body = test.observer.WrapResponseBody(body)
@@ -958,6 +980,29 @@ func (handler *Handler) executeCandidatesWithTest(
 		finishPrivacy()
 		_ = attemptRequest.Body.Close()
 
+		// Kiro's local adapter can reject an opaque thinking block before any
+		// network attempt. Apply the same opt-in repair exactly once; the
+		// resulting request still goes through privacy inspection afresh.
+		if candidate.Service.Kind == contract.ServiceKindKiroSubscription && canRepairThinking &&
+			errors.Is(forwardErr, providerapi.ErrKiroThinkingUnsupported) && !downstream.Committed() && repairedTargets[repairTarget] == nil {
+			if repaired := prepareReasoningRecovery(body, rectifyThinkingSignature); repaired != nil && schedule.repair(candidateIndex) {
+				repairedTargets[repairTarget] = repaired
+				records.noteRecoveryDecision(candidateIndex, schedule, thinkingSignatureRecoveryReason)
+				continue
+			}
+		}
+		var kiroFailure *providerapi.KiroStreamError
+		kiroAccountBlocked := false
+		if candidate.Service.Kind == contract.ServiceKindKiroSubscription && errors.As(forwardErr, &kiroFailure) && protection.risk {
+			signal := classifyKiroRisk(kiroFailure.Status, nil, kiroFailure.Body, time.Now())
+			handler.applySubscriptionRisk(request.Context(), candidate, signal, headers)
+			if signal.scope == subscriptionRiskAccount {
+				kiroAccountBlocked = true
+				schedule.excludeService(candidate.Service.ID)
+			} else if signal.scope == subscriptionRiskModel && limiter != nil {
+				limiter.RecordRateLimit(candidate, signal.cooldown)
+			}
+		}
 		if retryHTTP != nil {
 			last = executionFailure{kind: executionFailureUpstream, err: retryHTTP, endpointID: candidate.Service.ID}
 			lastNetworkFailure = last
@@ -1105,6 +1150,13 @@ func (handler *Handler) executeCandidatesWithTest(
 		if isUpstreamTimeout(forwardErr) {
 			action = policy.ResponseTimeout
 		}
+		if kiroFailure != nil {
+			action = policy.ActionForStatus(kiroFailure.Status)
+		}
+		if kiroAccountBlocked {
+			action = contract.FailureFailover
+		}
+
 		if !schedule.recover(candidateIndex, action, 0) {
 			recordSession.noteRecoveryStop(schedule.stopReason)
 			break

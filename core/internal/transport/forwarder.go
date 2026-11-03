@@ -151,6 +151,13 @@ func (forwarder *Forwarder) RoundTrip(request *http.Request, target Target) (*ht
 			return nil, &TargetError{err: err}
 		}
 	}
+	var kiroExchange *providerapi.KiroExchange
+	if target.Service.Kind == contract.ServiceKindKiroSubscription {
+		kiroExchange, err = providerapi.KiroRequest(outbound, target.RequestHeaders.Get(providerapi.KiroProfileHeader), target.RequestHeaders.Get(providerapi.KiroSessionHeader))
+		if err != nil {
+			return nil, &TargetError{err: err}
+		}
+	}
 	antigravityMode := ""
 	if target.Service.Kind == contract.ServiceKindAntigravitySubscription {
 		antigravityMode, err = providerapi.AntigravityRequest(outbound, target.RequestHeaders.Get(providerapi.AntigravityProjectHeader))
@@ -212,6 +219,12 @@ func (forwarder *Forwarder) RoundTrip(request *http.Request, target Target) (*ht
 	response.Body = body
 	if antigravityMode != "" {
 		if err := providerapi.AntigravityResponse(response, antigravityMode); err != nil {
+			_ = response.Body.Close()
+			return nil, &UpstreamError{err: err}
+		}
+	}
+	if kiroExchange != nil {
+		if err := providerapi.KiroResponse(response, kiroExchange); err != nil {
 			_ = response.Body.Close()
 			return nil, &UpstreamError{err: err}
 		}

@@ -1404,7 +1404,31 @@
     "keyFileReplace": "変更",
     "vertexKeyProject": "キーのプロジェクト: {{project}}",
     "vertexCredentialSaved": "サービスアカウントキーを保存済み",
-    "reorderCardKeys": "カードをドラッグして並べ替えます。ハンドルにフォーカスして矢印キーでも移動できます"
+    "reorderCardKeys": "カードをドラッグして並べ替えます。ハンドルにフォーカスして矢印キーでも移動できます",
+    "kiroHint": "AWS Builder ID、Google、GitHub、企業 SSO で Kiro を利用します。",
+    "kiroOauth": "Kiro OAuth",
+    "kiroAccount": "Kiro アカウント {{hint}}",
+    "kiroDeviceCodeDescription": "ブラウザーで Kiro にサインインし、デバイスコードを承認してください。",
+    "kiroDeviceCodeHint": "AWS Builder ID、Google / GitHub、企業 SSO に対応します。",
+    "kiroEnterDeviceCode": "AWS の認証ページを開き、このデバイスコードを承認してください。",
+    "kiroDeviceHint": "この画面を開いたままにしてください。承認後、接続は自動的に完了します。",
+    "kiroLoginMethod": "Kiro のログイン方法",
+    "kiroBuilderHint": "デバイスコードで個人の AWS Builder ID アカウントを接続します。",
+    "kiroSocialHint": "Kiro のログインページを開き、Google または GitHub を選択します。",
+    "kiroSSOHint": "組織から提供された Start URL と AWS リージョンを使用します。",
+    "kiroStartURL": "企業 Start URL",
+    "kiroRegion": "認証 AWS リージョン",
+    "kiroSSODevice": "デバイス認証を使用",
+    "kiroSSODeviceHint": "リモートやサーバー環境向けです。無効にするとブラウザーのコールバックを使います。",
+    "kiroManualCallback": "ログインのコールバックを手動で貼り付け",
+    "kiroManualHint": "ブラウザーとゲートウェイが別のマシンにある場合や、コールバックポートが使用中の場合に使います。",
+    "kiroCallbackTitle": "Kiro ログインを完了",
+    "kiroCallbackHint": "ログイン後、アドレスバーのローカルコールバック URL 全体をコピーして貼り付けてください。ページが開かなくてもコピーできます。コードだけではなく URL 全体が必要です。",
+    "kiroCallbackURL": "完全なコールバック URL",
+    "kiroProtocolHint": "ここにあるのはクライアントの入力形式です。Kiro のネイティブ API ではありません。Messages は Kiro GenerateAssistantResponse に変換し、他のチャット形式は Messages を経由して Kiro に変換します。モデル一覧はゲートウェイが提供します。",
+    "kiroAdapter": "Kiro プロトコルに変換",
+    "kiroLocalModels": "ローカルのモデル一覧",
+    "kiroVia": "{{protocol}} → Kiro"
   },
   "packages": {
     "subscriptions": "サブスクリプション",
@@ -1549,7 +1573,9 @@
     "formatTagTitle": "リクエストは {{format}} 形式に変換してから上流に送信します",
     "formatFollowEntry": "入口プロトコルの設定に従う",
     "formatDefaultBuiltin": "デフォルト（{{format}}）",
-    "formatResetBuiltin": "デフォルトに戻す"
+    "formatResetBuiltin": "デフォルトに戻す",
+    "adapterFormatTag": "アダプター入力：{{format}}",
+    "adapterFormatTagTitle": "{{format}} は中間形式です。最終リクエストには Kiro プロトコルを使用します。"
   },
   "tokens": {
     "search": "アクセストークンを検索",
@@ -1635,7 +1661,8 @@
     "antigravity_subscription": "Antigravity サブスクリプション",
     "copilot_subscription": "GitHub Copilot サブスクリプション",
     "droid_subscription": "Droid サブスクリプション",
-    "vertex": "Vertex AI"
+    "vertex": "Vertex AI",
+    "kiro_subscription": "Kiro サブスクリプション"
   },
   "subscription": {
     "tag": "サブスク",
@@ -3316,10 +3343,10 @@
   "failure": {
     "thinkingSignatureRecovery": "思考シグネチャ修復後の再試行",
     "repairHint": "修復は、ABC / AABBCC および通常の再試行ルールとは独立しています。各対象は、合計の試行上限の範囲で、すぐに 1 回だけ修復して再送できます。修復後のエラーは、エラールールに従います。",
-    "thinkingSignatureRecoveryHint": "思考シグネチャのエラーがある Claude の Anthropic リクエストでは、過去の思考をテキストに変換し、暗号化された思考を取り除き、思考を無効にしてから再送します。対象ごとに 1 回修復します。再試行の順序、利用枠、バックオフ、HTTP のエラールールとは独立しています。合計の試行回数には含まれます。",
+    "thinkingSignatureRecoveryHint": "思考シグネチャのエラーがある Claude の Anthropic リクエストでは、過去の思考をテキストに変換し、暗号化された思考を取り除き、思考を無効にしてから再送します。対象ごとに 1 回修復します。再試行の順序、利用枠、バックオフ、HTTP のエラールールとは独立しています。合計の試行回数には含まれます。 Kiro の Messages 互換リクエストにも適用されます。送信できない署名付きまたは暗号化思考は、送信前に同じ方法で修復します。無効時は履歴を捨てず、互換性エラーを返します。",
     "thinkingSignatureRepair": "思考シグネチャの修復",
     "openaiReasoningRecovery": "Codex / OpenAI 推論の修復後に再試行",
-    "openaiReasoningRecoveryHint": "Responses の推論暗号文、または項目の明示的なエラーでは、読める要約、ツール呼び出し、会話の関連付けを残したまま、無効な暗号文を取り除くか、特定された項目を修復します。通常の再試行ルールとは独立して、合計の試行上限の範囲で、対象ごとに 1 回修復します。無効なコンテキスト圧縮の暗号文は、エラーとして返します。",
+    "openaiReasoningRecoveryHint": "Responses の推論暗号文、または項目の明示的なエラーでは、読める要約、ツール呼び出し、会話の関連付けを残したまま、無効な暗号文を取り除くか、特定された項目を修復します。通常の再試行ルールとは独立して、合計の試行上限の範囲で、対象ごとに 1 回修復します。無効なコンテキスト圧縮の暗号文は、エラーとして返します。 ネイティブ Responses 上流にのみ適用されます。Kiro へのプロトコル変換には適用されず、他プロバイダーの暗号文も復号できません。",
     "openaiReasoningRepair": "OpenAI 推論の修復",
     "openaiFunctionOutputRecovery": "暗号化された関数出力の修復を許可",
     "openaiFunctionOutputRecoveryHint": "既定ではオフです。関数またはカスタムツールの出力暗号文を復号できず、Responses リクエストが拒否されたときは、その暗号化部分を捨て、平文の結果を残して、同じ対象へ再送します。推論の修復と、対象ごとの修復 1 回を共有し、同じ試行で両方を取り除けます。ツールの call_id の組はそのまま残します。通常の再試行ルールとは独立し、合計の試行回数に含まれます。",
@@ -3448,7 +3475,8 @@
     "plans": {
       "native": "そのまま転送",
       "delegated": "APIプロバイダーがプロトコルを変換",
-      "relaykit": "ローカルでプロトコルを変換"
+      "relaykit": "ローカルでプロトコルを変換",
+      "adapter": "Kiro プロトコル変換"
     },
     "skips": {
       "disabled": "無効",
@@ -3491,13 +3519,13 @@
   },
   "routing": {
     "identityTitle": "サブスクリプションのクライアント識別情報",
-    "identityHint": "既定で有効で、個別に制御できます。変更は自動で保存され、再起動なしで新しいリクエストに反映されます。無効にすると、認識したクライアントの識別情報は維持され、不明なクライアントは既定の識別情報を使います。認証と必要なプロトコルヘッダーは、引き続き適用されます。",
+    "identityHint": "各サブスクリプションで個別に有効です。変更は自動保存され、再起動せず新しいリクエストに適用されます。無効時は識別できるクライアントの情報を保持し、不明な場合は既定値を使います。認証と必須ヘッダーは引き続き付与します。",
     "identityLabel": "{{provider}}のクライアント識別情報を統一",
     "codexIdentityHint": "User-Agent、originator、バージョンを統一し、他のSDKのフィンガープリントヘッダーを除きます。無効にしても、これらは組のままです。",
     "claudeIdentityHint": "Claude CodeのUser-Agent とSDKのフィンガープリントヘッダー（X-Stainless）を統一します。クライアントの機能ベータは維持し、必要なOAuthのベータを追加します。",
     "grokIdentityHint": "Grok CLIのUser-Agent とバージョンを統一します。無効にしても、これらは組のままです。",
     "protectionTitle": "サブスクリプションアカウントの保護",
-    "protectionHint": "ClaudeとCodexのサブスクリプションに適用されます。既定で有効で、個別に制御できます。変更は自動で保存され、新しいリクエストに反映されます。",
+    "protectionHint": "アカウント制限の検出とセッション分離は Kiro にも適用されます。公式クライアントの透過転送と Codex・Claude の構造修正は各プロバイダー専用です。Kiro には常にプロトコル変換が必要です。",
     "protection": {
       "officialPassthrough": "公式クライアントのリクエストをそのまま転送",
       "officialPassthroughHint": "本物のClaude CodeまたはCodex CLIのリクエストと認識したときは、資格情報と必要なOAuth項目だけを追加し、識別ヘッダーとセッション識別子は送られたままにします。リクエスト書き換えでオンにした設定も、これらのリクエストに適用されます。下の他の保護は、サードパーティと変換後のリクエストにだけ適用されます。無効にすると、すべてのサブスクリプションリクエストが下のルールで整形されます。",
@@ -3530,7 +3558,12 @@
       "claudeVersionInvalid": "2.1.300のようなバージョンを入力してください。",
       "learnedVersion": "学習したバージョン {{version}}",
       "notLearned": "まだ学習していません。組み込みバージョンは {{version}} です。",
-      "versionPlaceholder": "空欄にすると、学習済みまたは組み込みのバージョンを使います。"
+      "versionPlaceholder": "空欄にすると、学習済みまたは組み込みのバージョンを使います。",
+      "kiro": "Kiro IDE の識別ヘッダーからバージョンを学習",
+      "kiroHint": "ゲートウェイに届いた、一致する Kiro IDE の User-Agent と X-Amz-User-Agent からのみ学習します。基準以上の新しいバージョンだけを採用し、マシン ID や認証情報は保存しません。無効時は学習済み情報も使用しません。",
+      "kiroVersion": "Kiro 最低バージョン",
+      "kiroVersionHint": "両ヘッダーの Kiro IDE バージョンを揃えて引き上げます。基準や学習済みバージョンには下げません。強制が無効なら識別できるクライアントの情報を保持します。",
+      "kiroVersionInvalid": "0.11.107 のようなバージョンを入力してください。"
     },
     "thinkingTitle": "思考レベル",
     "thinkingHint": "モデルが答える前に考える長さを設定します。",
@@ -3621,7 +3654,8 @@
     "waitingConnection": "接続後に保存",
     "autosaveFailed": "自動保存に失敗しました。変更は保持されています。",
     "autosaveInvalid": "{{tabs}}の未完成の設定は、完成すると自動で保存されます。他の変更は引き続き保存されます。",
-    "tabMention": "「{{tab}}」"
+    "tabMention": "「{{tab}}」",
+    "kiroIdentityHint": "Kiro IDE の User-Agent と X-Amz-User-Agent のバージョンを揃えます。無効時は一致するクライアントの識別情報を保持し、不明な場合は既定値を使います。"
   },
   "modelRedirect": {
     "title": "リダイレクトルール",

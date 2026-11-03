@@ -13,6 +13,53 @@ const timestamps = {
 };
 
 describe("subscription IPC contract", () => {
+  it.each(["browser", "authorization_code"])(
+    "accepts Kiro %s sessions without exposing exchange material",
+    (flow) => {
+      const session = {
+        id: "authorization_kiro",
+        provider: "kiro",
+        status: "pending",
+        flow,
+        service_id: "service_kiro",
+        authorization_url:
+          "https://app.kiro.dev/signin?state=public-state&code_challenge=public-challenge",
+        expires_at: "2026-11-02T08:15:00Z",
+        ...timestamps,
+      };
+      expect(parseAuthorizationSession(session).flow).toBe(flow);
+      expect(() =>
+        parseAuthorizationSession({
+          ...session,
+          code_verifier: "private-verifier",
+        }),
+      ).toThrow();
+    },
+  );
+
+  it("accepts Kiro device authorization but rejects other flows and credential fields", () => {
+    const session = {
+      id: "authorization_kiro",
+      provider: "kiro",
+      status: "pending",
+      flow: "device_code",
+      service_id: "service_kiro",
+      expires_at: "2026-11-02T08:15:00Z",
+      ...timestamps,
+      device_code: {
+        verification_url: "https://view.awsapps.com/start",
+        user_code: "KIRO-TEST",
+      },
+    };
+    expect(parseAuthorizationSession(session).provider).toBe("kiro");
+    expect(() =>
+      parseAuthorizationSession({ ...session, flow: "browser" }),
+    ).toThrow();
+    expect(() =>
+      parseAuthorizationSession({ ...session, client_secret: "private" }),
+    ).toThrow();
+  });
+
   it("parses pending authorization sessions with https URLs", () => {
     const session = parseAuthorizationSession({
       id: "authorization_01",

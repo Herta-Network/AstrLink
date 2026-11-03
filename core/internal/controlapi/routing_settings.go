@@ -52,6 +52,8 @@ func (handler *Handler) routingSettingsResource(writer http.ResponseWriter, requ
 				destination = &settings.ClaudeIdentityEnforcement
 			case "grok_identity_enforcement":
 				destination = &settings.GrokIdentityEnforcement
+			case "kiro_identity_enforcement":
+				destination = &settings.KiroIdentityEnforcement
 			case "subscription_risk_protection":
 				destination = &settings.SubscriptionRiskProtection
 			case "codex_request_normalization":
@@ -68,12 +70,16 @@ func (handler *Handler) routingSettingsResource(writer http.ResponseWriter, requ
 				destination = &settings.CodexIdentityAutoLearn
 			case "grok_identity_auto_learn":
 				destination = &settings.GrokIdentityAutoLearn
+			case "kiro_identity_auto_learn":
+				destination = &settings.KiroIdentityAutoLearn
 			case "claude_identity_version":
 				destination = &settings.ClaudeIdentityVersion
 			case "codex_identity_version":
 				destination = &settings.CodexIdentityVersion
 			case "grok_identity_version":
 				destination = &settings.GrokIdentityVersion
+			case "kiro_identity_version":
+				destination = &settings.KiroIdentityVersion
 			case "system_prompt_enabled":
 				destination = &settings.SystemPromptEnabled
 			case "system_prompt_prefix":

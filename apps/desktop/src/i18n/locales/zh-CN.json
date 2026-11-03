@@ -1404,7 +1404,31 @@
     "keyFileReplace": "更换",
     "vertexKeyProject": "密钥项目 {{project}}",
     "vertexCredentialSaved": "已保存服务账号密钥",
-    "reorderCardKeys": "拖动卡片排序；聚焦手柄后也可按方向键移动"
+    "reorderCardKeys": "拖动卡片排序；聚焦手柄后也可按方向键移动",
+    "kiroHint": "通过 AWS Builder ID、Google、GitHub 或企业 SSO 使用 Kiro。",
+    "kiroOauth": "Kiro OAuth",
+    "kiroAccount": "Kiro 账号 {{hint}}",
+    "kiroDeviceCodeDescription": "在浏览器中完成 Kiro 账号登录，然后批准设备授权码。",
+    "kiroDeviceCodeHint": "支持 AWS Builder ID、Google / GitHub 与企业 SSO。",
+    "kiroEnterDeviceCode": "打开 AWS 授权页面并批准此设备授权码。",
+    "kiroDeviceHint": "保持此窗口打开，批准授权后会自动完成连接。",
+    "kiroLoginMethod": "Kiro 登录方式",
+    "kiroBuilderHint": "通过设备授权连接个人 AWS Builder ID 账号。",
+    "kiroSocialHint": "打开 Kiro 登录页，选择 Google 或 GitHub 完成登录。",
+    "kiroSSOHint": "使用组织提供的 Start URL 和 AWS 区域登录。",
+    "kiroStartURL": "企业 Start URL",
+    "kiroRegion": "认证 AWS 区域",
+    "kiroSSODevice": "使用设备授权",
+    "kiroSSODeviceHint": "适合远程和服务器环境；关闭后使用浏览器回调。",
+    "kiroManualCallback": "手动粘贴登录回调",
+    "kiroManualHint": "浏览器与网关不在同一台机器，或回调端口被占用时使用。",
+    "kiroCallbackTitle": "完成 Kiro 登录",
+    "kiroCallbackHint": "完成浏览器登录后，复制地址栏中的完整本地回调 URL 并粘贴到下方。页面无法打开也可以复制地址；不要只复制 code。",
+    "kiroCallbackURL": "完整回调 URL",
+    "kiroProtocolHint": "这些是客户端接入格式，不是 Kiro 原生接口。Messages 会适配为 Kiro GenerateAssistantResponse；其他聊天协议先转换为 Messages，再适配 Kiro。模型列表由网关提供。",
+    "kiroAdapter": "适配为 Kiro 协议",
+    "kiroLocalModels": "本地提供模型列表",
+    "kiroVia": "{{protocol}} → Kiro"
   },
   "packages": {
     "subscriptions": "订阅套餐",
@@ -1549,7 +1573,9 @@
     "formatTagTitle": "请求会先转成 {{format}} 格式再发给上游",
     "formatFollowEntry": "按入口协议设置",
     "formatDefaultBuiltin": "默认（{{format}}）",
-    "formatResetBuiltin": "恢复默认"
+    "formatResetBuiltin": "恢复默认",
+    "adapterFormatTag": "适配输入：{{format}}",
+    "adapterFormatTagTitle": "{{format}} 是适配层的中间格式，最终发送 Kiro 协议"
   },
   "tokens": {
     "search": "搜索访问令牌",
@@ -1635,7 +1661,8 @@
     "antigravity_subscription": "Antigravity 订阅",
     "copilot_subscription": "GitHub Copilot 订阅",
     "droid_subscription": "Droid 订阅",
-    "vertex": "Vertex AI"
+    "vertex": "Vertex AI",
+    "kiro_subscription": "Kiro 订阅"
   },
   "subscription": {
     "tag": "订阅",
@@ -3317,10 +3344,10 @@
     "title": "失败处理",
     "thinkingSignatureRecovery": "思考签名修复重试",
     "repairHint": "修复独立于 ABC / AABBCC 和普通重试规则。每个目标最多立即修复重发一次，计入总尝试次数；仍失败再按错误规则处理。",
-    "thinkingSignatureRecoveryHint": "Claude 的 Anthropic 请求遇到思考签名错误时，将历史思考转成文本、移除加密思考并关闭本次思考后重发。每个目标最多修复一次，不占普通重试额度、不受重试顺序、退避或 HTTP 错误规则限制，但计入总尝试次数。",
+    "thinkingSignatureRecoveryHint": "Claude 的 Anthropic 请求遇到思考签名错误时，将历史思考转成文本、移除加密思考并关闭本次思考后重发。每个目标最多修复一次，不占普通重试额度、不受重试顺序、退避或 HTTP 错误规则限制，但计入总尝试次数。 Kiro 的 Messages 兼容入口也受此开关控制：遇到无法传递的带签名或加密思考历史时，先做同样的修复再发送。关闭后返回不兼容错误，不丢弃历史内容。",
     "thinkingSignatureRepair": "思考签名修复",
     "openaiReasoningRecovery": "Codex / OpenAI 推理修复重试",
-    "openaiReasoningRecoveryHint": "Responses 请求遇到明确的推理密文或条目错误时，清理失效密文或修复对应条目，保留可读摘要、工具调用和会话关联。每个目标最多修复一次，独立于普通重试规则，但计入总尝试次数。压缩上下文密文失效时直接返回错误。",
+    "openaiReasoningRecoveryHint": "Responses 请求遇到明确的推理密文或条目错误时，清理失效密文或修复对应条目，保留可读摘要、工具调用和会话关联。每个目标最多修复一次，独立于普通重试规则，但计入总尝试次数。压缩上下文密文失效时直接返回错误。 仅用于原生 Responses 上游；Kiro 的协议转换不适用，也不能解密其他提供商的密文。",
     "openaiReasoningRepair": "OpenAI 推理修复",
     "openaiFunctionOutputRecovery": "允许修复函数输出密文",
     "openaiFunctionOutputRecoveryHint": "默认关闭。Responses 请求因函数或自定义工具输出密文无法解密被拒绝时，去掉这些加密部分、保留明文结果，并对同一目标重发。与推理密文修复共用每个目标一次的修复机会，可在同一次修复中清理。工具 call_id 配对保持不变。独立于普通重试规则，但计入总尝试次数。",
@@ -3448,7 +3475,8 @@
     "plans": {
       "native": "原样转发",
       "delegated": "由 API 提供商转换协议",
-      "relaykit": "本地转换协议"
+      "relaykit": "本地转换协议",
+      "adapter": "Kiro 协议适配"
     },
     "skips": {
       "disabled": "已停用",
@@ -3491,13 +3519,13 @@
   },
   "routing": {
     "identityTitle": "订阅客户端身份",
-    "identityHint": "三个订阅渠道默认开启，互不影响。修改自动保存，对新请求生效，无需重启。关闭后保留可识别的对应客户端身份，无法识别时使用默认身份；认证和必要协议头仍会补齐。",
+    "identityHint": "各订阅渠道默认开启，互不影响。修改自动保存，对新请求生效，无需重启。关闭后保留可识别的对应客户端身份，无法识别时使用默认身份；认证和必要协议头仍会补齐。",
     "identityLabel": "统一 {{provider}} 客户端身份",
     "codexIdentityHint": "统一 User-Agent、originator 与版本，并移除其他 SDK 的指纹头；关闭后仍保持三者配对。",
     "claudeIdentityHint": "统一 Claude Code User-Agent 与 SDK 指纹头（X-Stainless）；保留客户端功能 Beta，并补齐 OAuth 必需项。",
     "grokIdentityHint": "统一 Grok CLI User-Agent 与版本；关闭后仍保持版本配对。",
     "protectionTitle": "订阅账号保护",
-    "protectionHint": "作用于 Claude 与 Codex 订阅，默认开启，互不影响。修改自动保存，对新请求生效。",
+    "protectionHint": "封控识别与会话隔离也适用于 Kiro。官方客户端原样转发及 Codex、Claude 请求结构修正仍只适用于对应渠道；Kiro 始终需要协议适配。修改自动保存，对新请求生效。",
     "protection": {
       "officialPassthrough": "官方客户端请求原样转发",
       "officialPassthroughHint": "识别到真正的 Claude Code 或 Codex CLI 请求时，只补充凭据和必需的 OAuth 项，身份头和会话标识保持原样。“请求改写”里开启的设置也会用在这些请求上。下面的其他保护只作用于第三方客户端和协议转换请求。关闭后所有订阅请求都按下方规则整形。",
@@ -3530,7 +3558,12 @@
       "claudeVersionInvalid": "请输入形如 2.1.300 的版本号。",
       "learnedVersion": "已学到版本 {{version}}",
       "notLearned": "尚未学到，内置版本 {{version}}",
-      "versionPlaceholder": "留空则使用已学习或内置版本"
+      "versionPlaceholder": "留空则使用已学习或内置版本",
+      "kiro": "从 Kiro IDE 身份头学习版本",
+      "kiroHint": "仅从网关收到且 User-Agent 与 X-Amz-User-Agent 匹配的 Kiro IDE 请求学习版本。只接受不低于内置基线的新版本；不保存机器 ID 或凭据。关闭后不再学习或使用已学版本。",
+      "kiroVersion": "Kiro 最低版本",
+      "kiroVersionHint": "同步提高两个身份头中的 Kiro IDE 版本，不降低内置或已学版本。关闭统一身份时，匹配的客户端仍保留自己的身份。",
+      "kiroVersionInvalid": "请输入形如 0.11.107 的版本号。"
     },
     "thinkingTitle": "思考强度",
     "thinkingHint": "设置模型回答前想多久。",
@@ -3621,7 +3654,8 @@
     "waitingConnection": "等待连接后自动保存",
     "autosaveFailed": "自动保存失败，修改已保留。",
     "autosaveInvalid": "{{tabs}}中有未填完的设置，填完后会自动保存。其他修改照常保存。",
-    "tabMention": "「{{tab}}」"
+    "tabMention": "「{{tab}}」",
+    "kiroIdentityHint": "统一 Kiro IDE 的 User-Agent 与 X-Amz-User-Agent 版本；关闭后保留匹配的客户端身份，无法识别时仍使用默认身份。"
   },
   "modelRedirect": {
     "title": "重定向规则",

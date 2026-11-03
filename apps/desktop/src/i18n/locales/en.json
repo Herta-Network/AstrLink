@@ -1404,7 +1404,31 @@
     "keyFileReplace": "Replace",
     "vertexKeyProject": "Key project: {{project}}",
     "vertexCredentialSaved": "Saved service account key",
-    "reorderCardKeys": "Drag cards to reorder; or focus the handle and use the arrow keys"
+    "reorderCardKeys": "Drag cards to reorder; or focus the handle and use the arrow keys",
+    "kiroHint": "Use Kiro with AWS Builder ID, Google, GitHub or enterprise SSO.",
+    "kiroOauth": "Kiro OAuth",
+    "kiroAccount": "Kiro account {{hint}}",
+    "kiroDeviceCodeDescription": "Sign in to Kiro in your browser, then approve the device code.",
+    "kiroDeviceCodeHint": "Supports AWS Builder ID, Google / GitHub and enterprise SSO.",
+    "kiroEnterDeviceCode": "Open the AWS authorization page and approve this device code.",
+    "kiroDeviceHint": "Keep this window open; the connection finishes automatically after approval.",
+    "kiroLoginMethod": "Kiro sign-in method",
+    "kiroBuilderHint": "Connect a personal AWS Builder ID account using a device code.",
+    "kiroSocialHint": "Open the Kiro sign-in page and choose Google or GitHub.",
+    "kiroSSOHint": "Use the Start URL and AWS region provided by your organization.",
+    "kiroStartURL": "Enterprise Start URL",
+    "kiroRegion": "Authentication AWS region",
+    "kiroSSODevice": "Use device authorization",
+    "kiroSSODeviceHint": "Suitable for remote and server environments. Turn off to use a browser callback.",
+    "kiroManualCallback": "Paste the login callback manually",
+    "kiroManualHint": "Use when your browser and gateway run on different machines or the callback port is occupied.",
+    "kiroCallbackTitle": "Complete Kiro sign-in",
+    "kiroCallbackHint": "After signing in, copy the complete local callback URL from the browser address bar and paste it below. You can copy it even if the page cannot open; do not paste only the code.",
+    "kiroCallbackURL": "Complete callback URL",
+    "kiroProtocolHint": "These are client-facing formats, not native Kiro endpoints. Messages is adapted to Kiro GenerateAssistantResponse; other chat protocols convert to Messages first, then to Kiro. The gateway serves the model list.",
+    "kiroAdapter": "Adapt to Kiro protocol",
+    "kiroLocalModels": "Locally served model catalog",
+    "kiroVia": "{{protocol}} → Kiro"
   },
   "packages": {
     "subscriptions": "Subscriptions",
@@ -1549,7 +1573,9 @@
     "formatTagTitle": "Requests are converted to {{format}} format before they go upstream",
     "formatFollowEntry": "As set in Entry protocols",
     "formatDefaultBuiltin": "Default ({{format}})",
-    "formatResetBuiltin": "Restore default"
+    "formatResetBuiltin": "Restore default",
+    "adapterFormatTag": "Adapter input: {{format}}",
+    "adapterFormatTagTitle": "{{format}} is the adapter’s intermediate format; the final request uses the Kiro protocol"
   },
   "tokens": {
     "search": "Search access tokens",
@@ -1635,7 +1661,8 @@
     "antigravity_subscription": "Antigravity subscription",
     "copilot_subscription": "GitHub Copilot subscription",
     "droid_subscription": "Droid subscription",
-    "vertex": "Vertex AI"
+    "vertex": "Vertex AI",
+    "kiro_subscription": "Kiro subscription"
   },
   "subscription": {
     "tag": "Sub",
@@ -3316,10 +3343,10 @@
   "failure": {
     "thinkingSignatureRecovery": "Retry after thinking signature repair",
     "repairHint": "Repair is independent of ABC / AABBCC and ordinary retry rules. Each target can be repaired and resent immediately once, within the total attempt limit. Errors after repair follow the error rules.",
-    "thinkingSignatureRecoveryHint": "For Claude Anthropic requests with thinking signature errors, convert historical thinking to text, remove encrypted thinking, and disable thinking before resending. Repair once per target, independently of retry order, quota, backoff and HTTP error rules. Counts toward the total attempt limit.",
+    "thinkingSignatureRecoveryHint": "For Claude Anthropic requests with thinking signature errors, convert historical thinking to text, remove encrypted thinking, and disable thinking before resending. Repair once per target, independently of retry order, quota, backoff and HTTP error rules. Counts toward the total attempt limit. This also controls Messages-compatible requests to Kiro: incompatible signed or encrypted thinking history is repaired locally before sending. When disabled, incompatible history is rejected rather than discarded.",
     "thinkingSignatureRepair": "Thinking signature repair",
     "openaiReasoningRecovery": "Retry after Codex / OpenAI reasoning repair",
-    "openaiReasoningRecoveryHint": "On explicit Responses reasoning ciphertext or item errors, remove invalid ciphertext or repair the identified item while preserving readable summaries, tool calls and conversation bindings. Repair once per target, independently of ordinary retry rules, within the total attempt limit. Invalid compaction ciphertext is returned as an error.",
+    "openaiReasoningRecoveryHint": "On explicit Responses reasoning ciphertext or item errors, remove invalid ciphertext or repair the identified item while preserving readable summaries, tool calls and conversation bindings. Repair once per target, independently of ordinary retry rules, within the total attempt limit. Invalid compaction ciphertext is returned as an error. Applies only to native Responses upstreams, not protocol conversion to Kiro; it cannot decrypt another provider’s ciphertext.",
     "openaiReasoningRepair": "OpenAI reasoning repair",
     "openaiFunctionOutputRecovery": "Allow encrypted function-output repair",
     "openaiFunctionOutputRecoveryHint": "Off by default. When a Responses request is rejected because function or custom-tool output ciphertext cannot be decrypted, drop those encrypted parts, keep plaintext results, and resend to the same target. Shares one repair per target with reasoning repair and can clear both in the same attempt. Tool call_id pairs stay intact. Independent of ordinary retry rules; counts toward the total attempt limit.",
@@ -3448,7 +3475,8 @@
     "plans": {
       "native": "Forwarded as is",
       "delegated": "API provider converts the protocol",
-      "relaykit": "Protocol converted locally"
+      "relaykit": "Protocol converted locally",
+      "adapter": "Kiro protocol adaptation"
     },
     "skips": {
       "disabled": "Disabled",
@@ -3491,13 +3519,13 @@
   },
   "routing": {
     "identityTitle": "Subscription client identity",
-    "identityHint": "Enabled by default and controlled independently. Changes save automatically and apply to new requests without restarting. When disabled, recognized client identities are preserved; unknown clients use the default identity. Authentication and required protocol headers still apply.",
+    "identityHint": "Enabled independently for each subscription provider. Changes save automatically and apply to new requests without restarting. When disabled, recognized client identities are preserved; unknown clients use the default. Authentication and required protocol headers are still supplied.",
     "identityLabel": "Unify {{provider}} client identity",
     "codexIdentityHint": "Unify User-Agent, originator, and version, and drop other SDK fingerprint headers. They remain paired when disabled.",
     "claudeIdentityHint": "Unify the Claude Code User-Agent and SDK fingerprint headers (X-Stainless). Preserve client feature betas and add required OAuth betas.",
     "grokIdentityHint": "Unify the Grok CLI User-Agent and version. They remain paired when disabled.",
     "protectionTitle": "Subscription account protection",
-    "protectionHint": "Applies to Claude and Codex subscriptions. Enabled by default and controlled independently. Changes save automatically and apply to new requests.",
+    "protectionHint": "Account-risk detection and session isolation also cover Kiro. Official-client passthrough and Codex/Claude request normalization remain specific to those providers; Kiro always requires protocol adaptation. Changes apply to new requests.",
     "protection": {
       "officialPassthrough": "Forward official client requests unchanged",
       "officialPassthroughHint": "When a genuine Claude Code or Codex CLI request is recognized, only credentials and required OAuth items are added, and identity headers and session identifiers stay as sent. Settings you turn on under Request rewriting also apply to these requests. The other protections below apply only to third-party and converted requests. When disabled, every subscription request is shaped by the rules below.",
@@ -3530,7 +3558,12 @@
       "claudeVersionInvalid": "Enter a version such as 2.1.300.",
       "learnedVersion": "Learned version {{version}}",
       "notLearned": "Nothing learned yet; built-in version {{version}}",
-      "versionPlaceholder": "Leave empty to use the learned or built-in version"
+      "versionPlaceholder": "Leave empty to use the learned or built-in version",
+      "kiro": "Learn versions from Kiro IDE identity headers",
+      "kiroHint": "Learn only from requests reaching the gateway with a matching Kiro IDE User-Agent and X-Amz-User-Agent. Accept newer versions at or above the baseline; never store machine IDs or credentials. Turning this off stops both learning and use of learned versions.",
+      "kiroVersion": "Kiro minimum version",
+      "kiroVersionHint": "Raise the Kiro IDE version in both identity headers without downgrading the baseline or learned version. With enforcement off, recognized clients keep their own identity.",
+      "kiroVersionInvalid": "Enter a version such as 0.11.107."
     },
     "thinkingTitle": "Thinking level",
     "thinkingHint": "Sets how long models think before they answer.",
@@ -3621,7 +3654,8 @@
     "waitingConnection": "Waiting for connection to save",
     "autosaveFailed": "Automatic saving failed. Your changes are kept.",
     "autosaveInvalid": "Incomplete settings in {{tabs}} save automatically once completed. Other changes still save.",
-    "tabMention": "{{tab}}"
+    "tabMention": "{{tab}}",
+    "kiroIdentityHint": "Keep the Kiro IDE versions in User-Agent and X-Amz-User-Agent paired. When disabled, preserve a recognized client identity; otherwise use the default."
   },
   "modelRedirect": {
     "title": "Redirect rules",

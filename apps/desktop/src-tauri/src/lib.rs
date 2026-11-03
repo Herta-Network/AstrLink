@@ -1548,10 +1548,11 @@ async fn probe_service_proxy(
 async fn begin_service_authorization(
     service_id: String,
     flow: String,
+    kiro: Option<serde_json::Value>,
     manager: State<'_, Arc<CoreManager>>,
 ) -> Result<serde_json::Value, String> {
     manager
-        .begin_service_authorization(&service_id, &flow)
+        .begin_service_authorization(&service_id, &flow, kiro)
         .await
 }
 

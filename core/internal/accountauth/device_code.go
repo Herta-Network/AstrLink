@@ -23,6 +23,7 @@ const (
 
 // polledDeviceAuthorization is one RFC 8628 device code awaiting approval.
 type polledDeviceAuthorization struct {
+	kiroTokens      AccountTokens
 	VerificationURL string
 	UserCode        string
 	DeviceCode      string

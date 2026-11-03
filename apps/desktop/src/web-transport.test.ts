@@ -26,6 +26,27 @@ afterEach(() => {
   fetchMock.mockReset();
 });
 describe("web command transport", () => {
+  it("forwards Kiro sign-in options without putting them in the URL", async () => {
+    const kiro = {
+      method: "iam_sso",
+      region: "eu-west-1",
+      start_url: "https://company.awsapps.com/start",
+    };
+    respond({ id: "authorization_kiro", flow: "authorization_code" });
+    await webInvoke("begin_service_authorization", {
+      serviceId: "service_kiro",
+      flow: "browser",
+      kiro,
+    });
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "/control/v1/services/service_kiro/authorization",
+    );
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      flow: "browser",
+      kiro,
+    });
+  });
+
   it("merges every service page and detects repeated cursors", async () => {
     respond({ items: [{ id: "svc_a" }], next_cursor: "cursor&1" });
     respond({ items: [{ id: "svc_b" }], next_cursor: null });

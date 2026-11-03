@@ -20,13 +20,19 @@ var (
 // AccountTokens is the recoverable OAuth material persisted only in
 // AccountCredentialStore. It must never enter control responses or React state.
 type AccountTokens struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
-	TokenType    string `json:"token_type,omitempty"`
-	Scope        string `json:"scope,omitempty"`
-	AccountID    string `json:"account_id,omitempty"`
-	ProjectID    string `json:"project_id,omitempty"`
-	PlanType     string `json:"plan_type,omitempty"`
+	KiroAuthMethod string `json:"kiro_auth_method,omitempty"`
+	AccessToken    string `json:"access_token"`
+	RefreshToken   string `json:"refresh_token"`
+	TokenType      string `json:"token_type,omitempty"`
+	// Kiro registers a public OIDC client per authorization. Its credentials
+	// are sealed with the account tokens, never included in service metadata.
+	OAuthClientID        string    `json:"oauth_client_id,omitempty"`
+	OAuthClientSecret    string    `json:"oauth_client_secret,omitempty"`
+	OAuthClientExpiresAt time.Time `json:"oauth_client_expires_at,omitempty"`
+	Scope                string    `json:"scope,omitempty"`
+	AccountID            string    `json:"account_id,omitempty"`
+	ProjectID            string    `json:"project_id,omitempty"`
+	PlanType             string    `json:"plan_type,omitempty"`
 	// Region is the provider region serving the account when it is not the
 	// default one (a Factory organization in the EU region).
 	Region           string    `json:"region,omitempty"`

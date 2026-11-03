@@ -49,7 +49,7 @@ export interface ProtocolCapability {
 }
 
 export interface PlanTypeCapability {
-  id: "native" | "delegated" | "relaykit";
+  id: "native" | "delegated" | "relaykit" | "adapter";
   available_in_alpha: boolean;
   uses_local_conversion: boolean;
 }
@@ -361,7 +361,8 @@ function parsePlan(value: unknown, path: string): PlanTypeCapability {
   if (
     plan.id !== "native" &&
     plan.id !== "delegated" &&
-    plan.id !== "relaykit"
+    plan.id !== "relaykit" &&
+    plan.id !== "adapter"
   ) {
     invalid(`${path}.id`, "unknown plan type");
   }
@@ -476,14 +477,20 @@ function parseCapabilities(value: unknown, path: string): CapabilitiesResponse {
   }
 
   const rawPlans = arrayAt(capabilities.plan_types, `${path}.plan_types`);
-  if (rawPlans.length !== 3)
-    invalid(`${path}.plan_types`, "expected exactly three plans");
+  if (rawPlans.length < 3 || rawPlans.length > 4)
+    invalid(
+      `${path}.plan_types`,
+      "expected three base plans and an optional provider adapter",
+    );
   const plans = rawPlans.map((plan, index) =>
     parsePlan(plan, `${path}.plan_types[${index}]`),
   );
   const plansByID = new Map(plans.map((plan) => [plan.id, plan]));
-  if (plansByID.size !== 3)
+  if (plansByID.size !== rawPlans.length)
     invalid(`${path}.plan_types`, "plan IDs must be unique");
+  const adapter = plansByID.get("adapter");
+  if (adapter && (adapter.available_in_alpha || !adapter.uses_local_conversion))
+    invalid(`${path}.plan_types`, "invalid provider adapter semantics");
   const expectedPlans = {
     native: { available: true, converts: false },
     delegated: { available: true, converts: false },

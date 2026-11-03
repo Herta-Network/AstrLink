@@ -68,10 +68,10 @@ func TestAntigravityBrowserAuthorizationAndRefresh(t *testing.T) {
 		})
 	ctx := context.Background()
 	const serviceID = "service_antigravity"
-	if _, err := manager.Begin(ctx, serviceID, contract.AuthorizationFlowDeviceCode); err == nil {
+	if _, err := manager.Begin(ctx, serviceID, contract.AuthorizationFlowDeviceCode, nil); err == nil {
 		t.Fatal("accepted unsupported device authorization")
 	}
-	session, err := manager.Begin(ctx, serviceID, contract.AuthorizationFlowBrowser)
+	session, err := manager.Begin(ctx, serviceID, contract.AuthorizationFlowBrowser, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -103,13 +103,13 @@ func TestGrokDeviceCodeAuthorizationPollsSlowsDownAndPersists(t *testing.T) {
 		}
 		return store.Put(ctx, session.ServiceID, tokens)
 	})
-	if _, err := manager.Begin(context.Background(), "service_grok", contract.AuthorizationFlowBrowser); err == nil {
+	if _, err := manager.Begin(context.Background(), "service_grok", contract.AuthorizationFlowBrowser, nil); err == nil {
 		t.Fatal("browser flow accepted for Grok")
 	}
-	if _, err := manager.Begin(context.Background(), "service_grok", contract.AuthorizationFlowCode); err == nil {
+	if _, err := manager.Begin(context.Background(), "service_grok", contract.AuthorizationFlowCode, nil); err == nil {
 		t.Fatal("authorization_code flow accepted for Grok")
 	}
-	session, err := manager.Begin(context.Background(), "service_grok", contract.AuthorizationFlowDeviceCode)
+	session, err := manager.Begin(context.Background(), "service_grok", contract.AuthorizationFlowDeviceCode, nil)
 	if err != nil {
 		t.Fatalf("Begin() = %v", err)
 	}
@@ -170,7 +170,7 @@ func TestGrokDeviceCodeDenialAndUnavailableAreSanitized(t *testing.T) {
 				Provider: contract.SubscriptionProviderXAIGrok, Issuer: issuer.URL, HTTPClient: issuer.Client(),
 				DevicePollMinInterval: 5 * time.Millisecond, DevicePollMaxInterval: 5 * time.Millisecond,
 			}, accountauth.NewMemoryCredentialStore(), nil)
-			session, err := manager.Begin(context.Background(), "service_grok", contract.AuthorizationFlowDeviceCode)
+			session, err := manager.Begin(context.Background(), "service_grok", contract.AuthorizationFlowDeviceCode, nil)
 			if mode == "unavailable" {
 				if err == nil || !strings.Contains(err.Error(), accountauth.ErrDeviceCodeUnavailable.Error()) {
 					t.Fatalf("Begin() = %#v, %v", session, err)

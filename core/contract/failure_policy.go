@@ -140,6 +140,7 @@ type RoutingSettings struct {
 	CodexIdentityEnforcement  bool          `json:"codex_identity_enforcement"`
 	ClaudeIdentityEnforcement bool          `json:"claude_identity_enforcement"`
 	GrokIdentityEnforcement   bool          `json:"grok_identity_enforcement"`
+	KiroIdentityEnforcement   bool          `json:"kiro_identity_enforcement"`
 	// Subscription account protections, all on by default.
 	// SubscriptionRiskProtection pauses accounts on upstream ban, quota and
 	// repeated 403 signals and refreshes a rejected token once.
@@ -167,12 +168,14 @@ type RoutingSettings struct {
 	ClaudeIdentityAutoLearn bool `json:"claude_identity_auto_learn"`
 	CodexIdentityAutoLearn  bool `json:"codex_identity_auto_learn"`
 	GrokIdentityAutoLearn   bool `json:"grok_identity_auto_learn"`
+	KiroIdentityAutoLearn   bool `json:"kiro_identity_auto_learn"`
 	// ClaudeIdentityVersion and CodexIdentityVersion are optional floors for
 	// the version that identity declares: a higher value replaces it, a lower
 	// one never downgrades it. Empty sets no floor.
 	ClaudeIdentityVersion string `json:"claude_identity_version,omitempty"`
 	CodexIdentityVersion  string `json:"codex_identity_version,omitempty"`
 	GrokIdentityVersion   string `json:"grok_identity_version,omitempty"`
+	KiroIdentityVersion   string `json:"kiro_identity_version,omitempty"`
 	// SystemPromptEnabled adds SystemPromptPrefix at the start and
 	// SystemPromptSuffix at the end of the system prompt of inference
 	// requests, except Claude Code's Haiku requests. The texts are sent
@@ -210,6 +213,7 @@ func DefaultRoutingSettings() RoutingSettings {
 		CodexIdentityEnforcement:     true,
 		ClaudeIdentityEnforcement:    true,
 		GrokIdentityEnforcement:      true,
+		KiroIdentityEnforcement:      true,
 		SubscriptionRiskProtection:   true,
 		CodexRequestNormalization:    true,
 		ClaudeRequestNormalization:   true,
@@ -218,6 +222,7 @@ func DefaultRoutingSettings() RoutingSettings {
 		ClaudeIdentityAutoLearn:      true,
 		CodexIdentityAutoLearn:       true,
 		GrokIdentityAutoLearn:        true,
+		KiroIdentityAutoLearn:        true,
 		ReasoningMode:                ReasoningModePassthrough,
 		ReasoningLevel:               ReasoningLevelMedium,
 		AdaptivePreset:               AdaptivePresetEveryday,
@@ -236,6 +241,9 @@ func (settings RoutingSettings) FailoverPolicy() FailoverPolicy {
 	return FailoverPolicy{Enabled: settings.AllowUnmatchedFailover, Strategy: settings.Strategy, MaxAttempts: settings.MaxAttempts}
 }
 func (settings RoutingSettings) Validate() error {
+	if settings.KiroIdentityVersion != "" && !ValidClientVersion(settings.KiroIdentityVersion) {
+		return fmt.Errorf("kiro_identity_version must be a semantic version")
+	}
 	if settings.GrokIdentityVersion != "" && !ValidClientVersion(settings.GrokIdentityVersion) {
 		return fmt.Errorf("grok_identity_version must be a version such as 1.0.45")
 	}

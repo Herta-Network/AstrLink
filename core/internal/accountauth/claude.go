@@ -93,6 +93,9 @@ func (manager *SessionManager) beginCodeAuthorization(ctx context.Context, servi
 // CompleteCode accepts only the code#state displayed by Claude's registered
 // callback. It is never included in session documents or provider error text.
 func (manager *SessionManager) CompleteCode(ctx context.Context, serviceID contract.ServiceID, sessionID contract.AuthorizationSessionID, code string) (contract.AuthorizationSession, error) {
+	if manager.config.Provider == contract.SubscriptionProviderKiro {
+		return manager.completeKiroCode(ctx, serviceID, sessionID, code)
+	}
 	manager.mu.Lock()
 	manager.expirePendingLocked()
 	session := manager.sessions[sessionID]

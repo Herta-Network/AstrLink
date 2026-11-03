@@ -145,6 +145,7 @@ func credentialHint(secret []byte) string {
 }
 
 type authorizationStartRequest struct {
+	Kiro *contract.KiroAuthorization `json:"kiro,omitempty"`
 	Flow *contract.AuthorizationFlow `json:"flow"`
 }
 
@@ -542,7 +543,12 @@ func (handler *Handler) serviceAuthorization(writer http.ResponseWriter, request
 		if mode == contract.SubscriptionModeOfficial {
 			defaultFlow = contract.AuthorizationFlowClaudeCLI
 		}
-		flow, ok := decodeAuthorizationFlow(writer, request, defaultFlow)
+		var kiroOptions *contract.KiroAuthorization
+		if current.Service.Kind == contract.ServiceKindKiroSubscription {
+			defaultFlow = contract.AuthorizationFlowDeviceCode
+			kiroOptions = &contract.KiroAuthorization{}
+		}
+		flow, ok := decodeAuthorizationFlow(writer, request, defaultFlow, kiroOptions)
 		if !ok {
 			return
 		}
@@ -550,7 +556,7 @@ func (handler *Handler) serviceAuthorization(writer http.ResponseWriter, request
 			writeError(writer, http.StatusUnprocessableEntity, "invalid_authorization_flow", "authorization flow is unsupported by this provider")
 			return
 		}
-		session, err := handler.subscriptions.BeginAuthorization(request.Context(), id, flow)
+		session, err := handler.subscriptions.BeginAuthorization(request.Context(), id, flow, kiroOptions)
 		if err != nil {
 			switch {
 			case errors.Is(err, subscription.ErrCredentialUnavailable), errors.Is(err, accountauth.ErrCredentialStoreUnavailable):
@@ -646,6 +652,7 @@ func decodeAuthorizationFlow(
 	writer http.ResponseWriter,
 	request *http.Request,
 	defaultFlow contract.AuthorizationFlow,
+	kiro *contract.KiroAuthorization,
 ) (contract.AuthorizationFlow, bool) {
 	request.Body = http.MaxBytesReader(writer, request.Body, maxControlBodyBytes)
 	raw, err := io.ReadAll(request.Body)
@@ -697,6 +704,22 @@ func decodeAuthorizationFlow(
 			"flow must be browser or device_code",
 		)
 		return "", false
+	}
+	if input.Kiro != nil && kiro == nil {
+		writeError(writer, http.StatusUnprocessableEntity, "invalid_authorization_flow", "Kiro options require a Kiro subscription")
+		return "", false
+	}
+	if kiro != nil {
+		options := contract.KiroAuthorization{}
+		if input.Kiro != nil {
+			options = *input.Kiro
+		}
+		normalized, err := options.Normalize(flow)
+		if err != nil {
+			writeError(writer, http.StatusUnprocessableEntity, "invalid_kiro_authorization", err.Error())
+			return "", false
+		}
+		*kiro = normalized
 	}
 	return flow, true
 }

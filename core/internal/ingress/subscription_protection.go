@@ -19,10 +19,12 @@ type subscriptionProtection struct {
 	claudeIdentity      bool
 	codexIdentity       bool
 	grokIdentity        bool
+	kiroIdentity        bool
 	officialPassthrough bool
 	claudeAutoLearn     bool
 	codexAutoLearn      bool
 	grokAutoLearn       bool
+	kiroAutoLearn       bool
 }
 
 func subscriptionProtectionFrom(settings contract.RoutingSettings) subscriptionProtection {
@@ -34,10 +36,12 @@ func subscriptionProtectionFrom(settings contract.RoutingSettings) subscriptionP
 		claudeIdentity:      settings.ClaudeIdentityEnforcement,
 		codexIdentity:       settings.CodexIdentityEnforcement,
 		grokIdentity:        settings.GrokIdentityEnforcement,
+		kiroIdentity:        settings.KiroIdentityEnforcement,
 		officialPassthrough: settings.OfficialClientPassthrough,
 		claudeAutoLearn:     settings.ClaudeIdentityAutoLearn,
 		codexAutoLearn:      settings.CodexIdentityAutoLearn,
 		grokAutoLearn:       settings.GrokIdentityAutoLearn,
+		kiroAutoLearn:       settings.KiroIdentityAutoLearn,
 	}
 }
 
@@ -55,6 +59,8 @@ func (protection subscriptionProtection) sendsClientIdentity(kind contract.Servi
 		return protection.claudeIdentity && !official
 	case contract.ServiceKindGrokSubscription:
 		return protection.grokIdentity
+	case contract.ServiceKindKiroSubscription:
+		return protection.kiroIdentity
 	case contract.ServiceKindAntigravitySubscription, contract.ServiceKindCopilotSubscription, contract.ServiceKindDroidSubscription:
 		return true
 	default:
@@ -71,6 +77,8 @@ func (handler *Handler) learnClientIdentity(ctx context.Context, provider contra
 		learn = handler.identities.LearnCodex
 	} else if provider == contract.SubscriptionProviderXAIGrok {
 		learn = handler.identities.LearnGrok
+	} else if provider == contract.SubscriptionProviderKiro {
+		learn = handler.identities.LearnKiro
 	}
 	if _, err := learn(ctx, header); err != nil {
 		logf := handler.recordLogger

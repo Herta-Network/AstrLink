@@ -32,7 +32,7 @@ func TestNoLoopbackCallbackReachesEveryProvider(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := manager.BeginAuthorization(ctx, account.ID, contract.AuthorizationFlowBrowser); !errors.Is(err, accountauth.ErrLoopbackCallbackUnavailable) {
+	if _, err := manager.BeginAuthorization(ctx, account.ID, contract.AuthorizationFlowBrowser, nil); !errors.Is(err, accountauth.ErrLoopbackCallbackUnavailable) {
 		t.Fatalf("BeginAuthorization() = %v, want ErrLoopbackCallbackUnavailable", err)
 	}
 	account, err = manager.Get(ctx, account.ID)

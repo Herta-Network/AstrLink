@@ -69,7 +69,7 @@ var subscriptionRiskJitter = func() time.Duration {
 
 func subscriptionRiskKind(kind contract.ServiceKind) bool {
 	return kind == contract.ServiceKindClaudeSubscription || kind == contract.ServiceKindCodexSubscription ||
-		kind == contract.ServiceKindCopilotSubscription || kind == contract.ServiceKindDroidSubscription
+		kind == contract.ServiceKindCopilotSubscription || kind == contract.ServiceKindDroidSubscription || kind == contract.ServiceKindKiroSubscription
 }
 
 func subscriptionRiskStatus(status int) bool {
@@ -92,6 +92,9 @@ func classifySubscriptionRisk(
 	body []byte,
 	now time.Time,
 ) subscriptionRiskSignal {
+	if kind == contract.ServiceKindKiroSubscription {
+		return classifyKiroRisk(status, header, body, now)
+	}
 	details, structured := parseSubscriptionError(body, now)
 	switch kind {
 	case contract.ServiceKindClaudeSubscription:
@@ -99,7 +102,7 @@ func classifySubscriptionRisk(
 	case contract.ServiceKindCodexSubscription:
 		return classifyCodexRisk(status, header, details, structured, now)
 	case contract.ServiceKindCopilotSubscription, contract.ServiceKindDroidSubscription:
-		// Neither publishes account-risk codes; a rejected token is
+		// These providers have no account-risk classifier; a rejected token is
 		// re-checked so a revoked one asks for a new sign-in.
 		return subscriptionRiskSignal{unauthorized: status == http.StatusUnauthorized}
 	default:

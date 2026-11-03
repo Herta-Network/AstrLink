@@ -717,6 +717,26 @@ describe("desktop bridge contract", () => {
     }
   });
 
+  it("accepts an explicit runtime provider adapter without changing the Alpha plans", async () => {
+    const snapshot = validSnapshot();
+    const capabilities = structuredClone(capabilityFixture);
+    capabilities.plan_types.push({
+      id: "adapter",
+      available_in_alpha: false,
+      uses_local_conversion: true,
+    });
+    snapshot.capabilities = capabilities;
+    invokeMock.mockResolvedValueOnce(snapshot);
+    expect(
+      (await getCoreStatus()).capabilities?.plan_types.find(
+        (plan) => plan.id === "adapter",
+      )?.uses_local_conversion,
+    ).toBe(true);
+    capabilities.plan_types[3].uses_local_conversion = false;
+    invokeMock.mockResolvedValueOnce(snapshot);
+    await expect(getCoreStatus()).rejects.toThrow("adapter semantics");
+  });
+
   it("rejects a snapshot with a missing frozen field", async () => {
     const wireSnapshot = validSnapshot();
     delete wireSnapshot.pid;

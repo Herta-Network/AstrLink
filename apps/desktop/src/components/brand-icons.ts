@@ -21,6 +21,7 @@ export { default as GithubCopilotMono } from "@lobehub/icons/es/GithubCopilot/co
 export { default as GrokMono } from "@lobehub/icons/es/Grok/components/Mono";
 export { default as HunyuanColor } from "@lobehub/icons/es/Hunyuan/components/Color";
 export { default as KiloCodeMono } from "@lobehub/icons/es/KiloCode/components/Mono";
+export { default as KiroMono } from "@lobehub/icons/es/Kiro/components/Mono";
 export { default as KimiMono } from "@lobehub/icons/es/Kimi/components/Mono";
 export { default as MetaColor } from "@lobehub/icons/es/Meta/components/Color";
 export { default as MinimaxColor } from "@lobehub/icons/es/Minimax/components/Color";

@@ -27,6 +27,7 @@ const (
 	ServiceKindAntigravitySubscription ServiceKind = "antigravity_subscription"
 	ServiceKindCopilotSubscription     ServiceKind = "copilot_subscription"
 	ServiceKindDroidSubscription       ServiceKind = "droid_subscription"
+	ServiceKindKiroSubscription        ServiceKind = "kiro_subscription"
 	ServiceKindOpenCodeGo              ServiceKind = "opencode_go"
 	ServiceKindOpenCodeZen             ServiceKind = "opencode_zen"
 	ServiceKindKimiCoding              ServiceKind = "kimi_coding"
@@ -54,7 +55,7 @@ func (kind ServiceKind) Valid() bool {
 	case ServiceKindCodexSubscription, ServiceKindNewAPI, ServiceKindMagpie, ServiceKindOpenAI,
 		ServiceKindAnthropic, ServiceKindGemini, ServiceKindVertex, ServiceKindOpenAICompatible,
 		ServiceKindCustom, ServiceKindClaudeSubscription, ServiceKindGrokSubscription, ServiceKindAntigravitySubscription,
-		ServiceKindCopilotSubscription, ServiceKindDroidSubscription, ServiceKindOpenCodeGo,
+		ServiceKindCopilotSubscription, ServiceKindDroidSubscription, ServiceKindKiroSubscription, ServiceKindOpenCodeGo,
 		ServiceKindOpenCodeZen, ServiceKindKimiCoding, ServiceKindGLMCoding, ServiceKindMiniMaxCoding,
 		ServiceKindDeepSeek, ServiceKindQwen, ServiceKindMoonshot, ServiceKindGLM, ServiceKindMiniMax, ServiceKindDoubao, ServiceKindXAI:
 		return true
@@ -66,7 +67,7 @@ func (kind ServiceKind) Valid() bool {
 func (kind ServiceKind) IsSubscription() bool {
 	return kind == ServiceKindCodexSubscription || kind == ServiceKindClaudeSubscription || kind == ServiceKindGrokSubscription ||
 		kind == ServiceKindAntigravitySubscription || kind == ServiceKindCopilotSubscription ||
-		kind == ServiceKindDroidSubscription
+		kind == ServiceKindDroidSubscription || kind == ServiceKindKiroSubscription
 }
 
 func (kind ServiceKind) SubscriptionProvider() SubscriptionProvider {
@@ -81,6 +82,8 @@ func (kind ServiceKind) SubscriptionProvider() SubscriptionProvider {
 		return SubscriptionProviderGitHubCopilot
 	case ServiceKindDroidSubscription:
 		return SubscriptionProviderFactoryDroid
+	case ServiceKindKiroSubscription:
+		return SubscriptionProviderKiro
 	case ServiceKindCodexSubscription:
 		return SubscriptionProviderOpenAICodex
 	default:
@@ -310,9 +313,9 @@ func (service Service) ModelProtocol(model string) ProtocolID {
 }
 
 // ResponsesWebSocket reports the effective per-channel transport setting.
-// Copilot, Droid and Vertex do not expose native Responses WebSockets.
+// Copilot, Droid, Kiro and Vertex do not expose native Responses WebSockets.
 func (service Service) ResponsesWebSocket() bool {
-	if service.Kind == ServiceKindCopilotSubscription || service.Kind == ServiceKindDroidSubscription || service.Kind == ServiceKindVertex {
+	if service.Kind == ServiceKindCopilotSubscription || service.Kind == ServiceKindDroidSubscription || service.Kind == ServiceKindKiroSubscription || service.Kind == ServiceKindVertex {
 		return false
 	}
 	if service.ResponsesWebSocketEnabled != nil {
@@ -394,6 +397,9 @@ func (service Service) Validate() error {
 	}
 	seen := make(map[string]struct{}, len(service.Capabilities))
 	for index, capability := range service.Capabilities {
+		if capability.Mode == CapabilityModeAdapter && service.Kind != ServiceKindKiroSubscription {
+			return fmt.Errorf("provider adapter mode is not supported for %s", service.Kind)
+		}
 		if service.Kind == ServiceKindVertex {
 			if service.VertexExpress() && capability.Protocol.IsModelFormat() {
 				upstream := capability.Protocol

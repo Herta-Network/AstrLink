@@ -27,7 +27,7 @@ export interface RouteEvent {
 }
 
 const SEPARATOR = " · ";
-const planTypes = new Set(["native", "delegated", "relaykit"]);
+const planTypes = new Set(["native", "delegated", "relaykit", "adapter"]);
 /** A provider without the model could not have served the call in any state. */
 const MODEL_NOT_LISTED = "model_not_listed";
 
@@ -172,8 +172,9 @@ export function routeRowSummary(
         );
       }
       // Forwarding as is needs no mention; a conversion does.
-      if (step.code && step.code !== "native") {
-        const plan = routingPlanLabel(step.code);
+      const code = step.code;
+      if (code && code !== "native") {
+        const plan = routingPlanLabel(code);
         if (plan) parts.push(plan);
       }
     }

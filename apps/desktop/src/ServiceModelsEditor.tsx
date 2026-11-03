@@ -55,6 +55,7 @@ export type UpstreamModelSnapshot = {
 };
 
 export type ServiceModelsEditorProps = {
+  formatRole?: "upstream" | "adapter";
   /** Use one toolbar when the surrounding tab already names the editor. */
   compact?: boolean;
   models: string[];
@@ -90,6 +91,7 @@ type ModelsConfirm =
 
 /** What every model row shares: its format choice and selection state. */
 type ModelRowControls = {
+  formatRole: "upstream" | "adapter";
   builtinProtocol: (model: string) => ModelFormat | undefined;
   /** The checked models in selection mode, or null outside it. */
   checked: ReadonlySet<string> | null;
@@ -369,12 +371,22 @@ function ModelRow({
         <Badge
           className="shrink-0 px-1.5 py-0 text-micro font-normal"
           data-testid="service-model-format"
-          title={t("models.formatTagTitle", {
-            format: modelFormatLabels[format],
-          })}
+          title={t(
+            controls.formatRole === "adapter"
+              ? "models.adapterFormatTagTitle"
+              : "models.formatTagTitle",
+            {
+              format: modelFormatLabels[format],
+            },
+          )}
           variant="secondary"
         >
-          {t("models.formatTag", { format: modelFormatLabels[format] })}
+          {t(
+            controls.formatRole === "adapter"
+              ? "models.adapterFormatTag"
+              : "models.formatTag",
+            { format: modelFormatLabels[format] },
+          )}
         </Badge>
       ) : null}
     </span>
@@ -485,6 +497,7 @@ function ModelGroupSection({
 }
 
 export function ServiceModelsEditor({
+  formatRole = "upstream",
   compact = false,
   models,
   modelEditor,
@@ -643,6 +656,7 @@ export function ServiceModelsEditor({
   };
 
   const rowControls: ModelRowControls = {
+    formatRole,
     builtinProtocol,
     checked: selecting ? checked : null,
     formats,

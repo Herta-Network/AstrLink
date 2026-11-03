@@ -158,7 +158,7 @@ func TestLoginKeepsThePlanOfTheSameProviderAccount(t *testing.T) {
 	login := func(providerAccountID string) {
 		t.Helper()
 		tokenAccount.Store(providerAccountID)
-		session, err := manager.BeginAuthorization(ctx, id, contract.AuthorizationFlowCode)
+		session, err := manager.BeginAuthorization(ctx, id, contract.AuthorizationFlowCode, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

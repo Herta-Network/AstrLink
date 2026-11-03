@@ -87,7 +87,7 @@ describe("shared global recovery settings", () => {
       .querySelector<HTMLInputElement>("input")!;
   }
 
-  it.each(["Codex", "Claude", "Grok"])(
+  it.each(["Codex", "Claude", "Grok", "Kiro"])(
     "saves %s identity independently through Routing and retains a failed draft",
     async (provider) => {
       const dirty = vi.fn();
@@ -102,7 +102,7 @@ describe("shared global recovery settings", () => {
           '[data-testid="upstream-identity-settings"] [role="switch"]',
         ),
       ];
-      expect(toggles).toHaveLength(3);
+      expect(toggles).toHaveLength(identitySettingKeys.length);
       for (const toggle of toggles)
         expect(toggle.getAttribute("aria-checked")).toBe("true");
       const toggle = container.querySelector<HTMLButtonElement>(
@@ -172,6 +172,7 @@ describe("shared global recovery settings", () => {
     ["codex_identity_auto_learn", "从 Codex CLI 请求学习身份"],
     ["claude_identity_auto_learn", "从 Claude Code 请求学习身份"],
     ["grok_identity_auto_learn", "从 Grok CLI 请求学习身份"],
+    ["kiro_identity_auto_learn", "从 Kiro IDE 身份头学习版本"],
   ])("defaults %s on and saves it independently", async (key, label) => {
     const dirty = vi.fn();
     await act(async () =>
@@ -205,6 +206,7 @@ describe("shared global recovery settings", () => {
       codex: { learned_version: "0.160.0", builtin_version: "0.155.1" },
       claude: { builtin_version: "2.1.258" },
       grok: { builtin_version: "1.0.45", learned_version: "1.0.50" },
+      kiro: { builtin_version: "0.11.107", learned_version: "0.12.0" },
     });
     await act(async () =>
       root.render(
@@ -218,6 +220,7 @@ describe("shared global recovery settings", () => {
       return document.getElementById(id)?.textContent;
     };
     expect(status("从 Grok CLI 请求学习身份")).toBe("已学到版本 1.0.50");
+    expect(status("从 Kiro IDE 身份头学习版本")).toBe("已学到版本 0.12.0");
     expect(status("从 Codex CLI 请求学习身份")).toBe("已学到版本 0.160.0");
     expect(status("从 Claude Code 请求学习身份")).toBe(
       "尚未学到，内置版本 2.1.258",
@@ -228,6 +231,7 @@ describe("shared global recovery settings", () => {
     ["codex_identity_version", "Codex 最低版本", "0.160.0", "0.143.9"],
     ["claude_identity_version", "Claude Code 最低版本", "2.1.300", "2.1"],
     ["grok_identity_version", "Grok 最低版本", "1.0.50", "1.0"],
+    ["kiro_identity_version", "Kiro 最低版本", "0.12.0", "0.12"],
   ])(
     "commits the %s override on blur or Enter and clears it with an empty value",
     async (key, label, version, invalid) => {

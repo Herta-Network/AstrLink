@@ -36,7 +36,7 @@ func (handler *Handler) rememberResponseAffinity(ctx context.Context, session *r
 	if model == "" {
 		model = session.classified.routingModel()
 	}
-	binding := storage.ResponseAffinity{ServiceID: candidate.CanonicalService().ID, UpstreamModel: model, UpstreamProtocol: plan.UpstreamProtocol, PlanType: plan.Type}
+	binding := storage.ResponseAffinity{ServiceID: candidate.CanonicalService().ID, UpstreamModel: model, UpstreamProtocol: plan.ProcessingProtocol(), PlanType: plan.Type}
 	key := affinityKey{string(principal), session.outputResponseID}
 	handler.affinities.mu.Lock()
 	if handler.affinities.entries == nil {
@@ -104,6 +104,12 @@ func (handler *Handler) bindResponseAffinity(ctx context.Context, request Reques
 				planType = contract.PlanTypeNative
 				if candidate.Mode == contract.CapabilityModeDelegated {
 					planType = contract.PlanTypeDelegated
+				}
+			}
+			if candidate.CanonicalService().Kind == contract.ServiceKindKiroSubscription {
+				planType = contract.PlanTypeAdapter
+				if binding.PlanType == contract.PlanTypeNative || binding.PlanType == contract.PlanTypeRelayKit {
+					binding.PlanType = contract.PlanTypeAdapter
 				}
 			}
 			compatibleProtocol := protocol == binding.UpstreamProtocol || (protocol == contract.ProtocolOpenAIResponsesCompact && binding.UpstreamProtocol == contract.ProtocolOpenAIResponses)

@@ -22,7 +22,7 @@ type RelayKitInput struct {
 }
 
 // BuildRelayKit binds exactly one engine-advertised conversion edge to a
-// natively-capable upstream endpoint. Multi-edge planning is intentionally not
+// directly supported standard format or provider-adapter input. Multi-edge planning is intentionally not
 // selected by the ingress MVP.
 func BuildRelayKit(input RelayKitInput) (contract.ExecutionPlan, error) {
 	service := input.Service
@@ -42,7 +42,7 @@ func BuildRelayKit(input RelayKitInput) (contract.ExecutionPlan, error) {
 		return contract.ExecutionPlan{}, ErrEndpointDisabled
 	}
 	modelFormat := input.UpstreamModel != "" && service.ModelProtocol(input.UpstreamModel) == input.UpstreamProtocol
-	if !modelFormat && !supportsNative(service, input.UpstreamProtocol, input.Streaming) &&
+	if !modelFormat && !supportsDirect(service, input.UpstreamProtocol, input.Streaming) &&
 		!hasDeclaredConversion(service, input.InputProtocol, input.UpstreamProtocol, input.Streaming) {
 		return contract.ExecutionPlan{}, &CapabilityUnavailableError{
 			Protocol: input.UpstreamProtocol, Mode: contract.CapabilityModeNative, Streaming: input.Streaming,
@@ -67,13 +67,16 @@ func BuildRelayKit(input RelayKitInput) (contract.ExecutionPlan, error) {
 		ConversionPath: []contract.ConversionEdge{*selected}, ConversionQuality: selected.Quality,
 		Streaming: input.Streaming,
 	}
+	if service.Kind == contract.ServiceKindKiroSubscription {
+		plan = contract.AdaptKiroPlan(plan)
+	}
 	if err := plan.ValidateForRuntime(contract.RuntimeProfile{RelayKitAvailable: true, Edges: input.Edges}); err != nil {
 		return contract.ExecutionPlan{}, fmt.Errorf("build RelayKit plan: %w", err)
 	}
 	return plan, nil
 }
 
-func supportsNative(endpoint contract.Service, protocol contract.ProtocolID, streaming bool) bool {
+func supportsDirect(endpoint contract.Service, protocol contract.ProtocolID, streaming bool) bool {
 	for _, capability := range endpoint.Capabilities {
 		if capability.Protocol == protocol && capability.ConvertTo == "" &&
 			(!streaming || capability.Streaming) {

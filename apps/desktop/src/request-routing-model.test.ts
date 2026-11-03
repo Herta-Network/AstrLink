@@ -52,6 +52,30 @@ const unavailable: Pick<
 };
 
 describe("routeEventStep", () => {
+  it("labels Kiro provider adaptation", () => {
+    const services = {
+      service_kiro: {
+        id: "service_kiro",
+        name: "Kiro",
+        kind: "kiro_subscription" as const,
+      },
+    };
+    const event = routed("adapter · service_kiro", "succeeded");
+    const summary = routeRowSummary(
+      event,
+      { service_id: "service_kiro", events: [event] },
+      services,
+      true,
+    );
+    expect(summary).toContain("Kiro 协议适配");
+    expect(summary).not.toContain("原样转发");
+    expect(routeEventStep(event)).toEqual({
+      serviceId: "service_kiro",
+      outcome: "selected",
+      code: "adapter",
+    });
+  });
+
   it("reads the provider Core used and the ones it refused", () => {
     expect(routeEventStep(routed("relaykit · service_a", "succeeded"))).toEqual(
       { serviceId: "service_a", outcome: "selected", code: "relaykit" },

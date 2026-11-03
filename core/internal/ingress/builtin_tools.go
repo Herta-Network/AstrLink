@@ -534,7 +534,7 @@ func filterBuiltinCandidates(ctx context.Context, candidates []endpoint.Resolved
 		return candidates
 	}
 	for _, candidate := range candidates {
-		if candidate.CanonicalService().ID != mode.Target || (mode.Native && candidate.PlanType == contract.PlanTypeRelayKit) {
+		if candidate.CanonicalService().ID != mode.Target || (mode.Native && candidate.PlanType.UsesLocalConversion()) {
 			continue
 		}
 		if !mode.Native {

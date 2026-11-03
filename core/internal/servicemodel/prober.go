@@ -235,6 +235,13 @@ func (prober *Prober) probeSubscription(
 		discovery, err := prober.probeHTTPPages(probeContext, prober.subscriptions.APIBaseURLFor(account.Provider), headers, protocol, false, "", false)
 		return discovery.Models, err
 	}
+	if account.Provider == contract.SubscriptionProviderKiro {
+		ids, err := prober.subscriptions.KiroModels(probeContext, tokens)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrUpstream, err)
+		}
+		return normalizeProbeIDs(ids)
+	}
 	if account.Provider == contract.SubscriptionProviderFactoryDroid {
 		// Factory publishes no model endpoint; the list is the one it documents.
 		return normalizeProbeIDs(subscription.DroidModels())

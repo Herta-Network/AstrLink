@@ -1,3 +1,11 @@
+import { KiroAuthorizationEditor } from "./components/KiroAuthorizationEditor";
+import {
+  defaultKiroLoginDraft,
+  kiroLoginFlow,
+  kiroLoginOptions,
+  kiroLoginValid,
+  type KiroLoginDraft,
+} from "./kiro-authorization-model";
 import { KeyFileInput } from "./components/KeyFileInput";
 import { useWorkspaceSnapshot } from "./workspace-snapshots";
 import { ServiceProxyFields } from "./components/ServiceProxyFields";
@@ -190,7 +198,7 @@ import {
   subscriptionConversionTargets,
   subscriptionKinds,
   subscriptionKindProviders,
-  subscriptionNativeCapabilities,
+  subscriptionBaseCapabilities,
   type HTTPServiceKind,
   type ModelDiscoveryProtocol,
   type ModelProtocol,
@@ -278,6 +286,7 @@ type Draft = {
   modelProtocols: ModelProtocol[];
   capabilities: ServiceCapability[];
   authorizationFlow: AuthorizationFlow | null;
+  kiroLogin?: KiroLoginDraft;
   modelListPath: string;
   vertexProjectID: string;
   vertexLocation: string;
@@ -401,6 +410,7 @@ function defaultAuthorizationFlow(
   mode: SubscriptionMode | undefined,
 ): AuthorizationFlow | null {
   if (!isSubscriptionKind(kind)) return null;
+  if (kind === "kiro_subscription") return "device_code";
   const flows = accountAuthorizationFlows(
     subscriptionKindProviders[kind],
     mode,
@@ -416,6 +426,7 @@ function officialClaude(service: Service | null | undefined): boolean {
 }
 
 function subscriptionDefaultName(kind: SubscriptionServiceKind): string {
+  if (kind === "kiro_subscription") return "Kiro";
   if (kind === "antigravity_subscription") return "Antigravity";
   if (kind === "claude_subscription") return "Claude Code";
   if (kind === "grok_subscription") return i18n.t("services.grokName");
@@ -425,6 +436,7 @@ function subscriptionDefaultName(kind: SubscriptionServiceKind): string {
 }
 
 function subscriptionKindHint(kind: SubscriptionServiceKind): string {
+  if (kind === "kiro_subscription") return i18n.t("services.kiroHint");
   if (kind === "antigravity_subscription")
     return i18n.t("services.antigravityHint");
   if (kind === "claude_subscription") return i18n.t("services.claudeKindHint");
@@ -435,6 +447,7 @@ function subscriptionKindHint(kind: SubscriptionServiceKind): string {
 }
 
 function subscriptionOauthLabel(kind: ServiceKind): string {
+  if (kind === "kiro_subscription") return i18n.t("services.kiroOauth");
   if (kind === "antigravity_subscription") return "Antigravity OAuth";
   if (kind === "claude_subscription") return "Claude Code OAuth";
   if (kind === "grok_subscription") return i18n.t("services.xaiGrokOauth");
@@ -460,6 +473,8 @@ function serviceCardDetail(service: Service): string {
 }
 
 function subscriptionAccountLabel(kind: ServiceKind, hint: string): string {
+  if (kind === "kiro_subscription")
+    return i18n.t("services.kiroAccount", { hint });
   if (kind === "antigravity_subscription")
     return i18n.t("services.googleAccount", { hint });
   if (kind === "claude_subscription")
@@ -476,6 +491,7 @@ function subscriptionAccountLabel(kind: ServiceKind, hint: string): string {
 function deviceCodeDescription(
   provider: SubscriptionProvider | undefined,
 ): string {
+  if (provider === "kiro") return i18n.t("services.kiroDeviceCodeDescription");
   if (provider === "github_copilot")
     return i18n.t("services.copilotDeviceCodeDescription");
   if (provider === "factory_droid")
@@ -528,6 +544,8 @@ function riskNoticeCopy(kind: ServiceKind | undefined): {
 
 /** Device-code hint for the kinds that sign in only that way. */
 function deviceCodeKindHint(kind: ServiceKind | undefined): string {
+  if (kind === "kiro_subscription")
+    return i18n.t("services.kiroDeviceCodeHint");
   if (kind === "copilot_subscription")
     return i18n.t("services.copilotDeviceCodeHint");
   if (kind === "droid_subscription")
@@ -618,7 +636,7 @@ function draftForKind(
       models: [],
       modelRedirects: [],
       modelProtocols: [],
-      capabilities: subscriptionNativeCapabilities[kind].map((capability) => ({
+      capabilities: subscriptionBaseCapabilities[kind].map((capability) => ({
         ...capability,
       })),
       authorizationFlow: defaultAuthorizationFlow(kind, "official"),
@@ -848,7 +866,12 @@ function validateDraft(
     return i18n.t("services.redirectsInvalid");
   }
   if (isSubscriptionKind(draft.kind)) {
-    if (!editing && draft.authorizationFlow === null) {
+    if (
+      !editing &&
+      (draft.authorizationFlow === null ||
+        (draft.kind === "kiro_subscription" &&
+          !kiroLoginValid(draft.kiroLogin ?? defaultKiroLoginDraft())))
+    ) {
       return i18n.t("services.chooseLogin");
     }
     return null;
@@ -1138,6 +1161,10 @@ export function ServiceManager({
   const [error, setError] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null);
   const [loginChoice, setLoginChoice] = useState<Service | null>(null);
+  const [kiroLogin, setKiroLogin] = useState(defaultKiroLoginDraft);
+  useEffect(() => {
+    setKiroLogin(defaultKiroLoginDraft());
+  }, [loginChoice?.id]);
   const [riskStart, setRiskStart] = useState<RiskStart>(null);
   const [loginChoiceFlow, setLoginChoiceFlow] =
     useState<AuthorizationFlow | null>(null);
@@ -1597,7 +1624,7 @@ export function ServiceManager({
         item.protocol === protocol
           ? {
               protocol: item.protocol,
-              mode: "native",
+              mode: current.kind === "kiro_subscription" ? "adapter" : "native",
               streaming: item.streaming,
               ...(value !== localConversionPassthrough
                 ? { convert_to: value }
@@ -1635,7 +1662,7 @@ export function ServiceManager({
           ...current.capabilities,
           {
             protocol: descriptor.id,
-            mode: "native",
+            mode: current.kind === "kiro_subscription" ? "adapter" : "native",
             streaming: descriptor.streaming,
             ...(convertTo ? { convert_to: convertTo } : {}),
           },
@@ -1952,7 +1979,7 @@ export function ServiceManager({
             ...(draft.failurePolicy
               ? { failure_policy: draft.failurePolicy }
               : {}),
-            // Omitted capabilities default to the provider's native set.
+            // Omitted capabilities default to the provider's base ingress set.
             ...(draft.capabilities.some((capability) => capability.convert_to)
               ? {
                   capabilities: draft.capabilities.map((capability) => ({
@@ -1999,10 +2026,13 @@ export function ServiceManager({
               throw new Error(t("services.chooseLogin"));
             }
             importedAfterLogin.current.delete(record.service.id);
-            const authorization = await beginServiceAuthorization(
-              record.service.id,
-              flow,
-            );
+            const kiro =
+              draft.kind === "kiro_subscription"
+                ? kiroLoginOptions(draft.kiroLogin ?? defaultKiroLoginDraft())
+                : undefined;
+            const authorization = kiro
+              ? await beginServiceAuthorization(record.service.id, flow, kiro)
+              : await beginServiceAuthorization(record.service.id, flow);
             presentAuthorization(record.service, flow, authorization.session);
           } catch (cause) {
             notify.success(t("services.addedLaterLogin"));
@@ -2041,7 +2071,13 @@ export function ServiceManager({
     setError(null);
     try {
       importedAfterLogin.current.delete(service.id);
-      const result = await beginServiceAuthorization(service.id, flow);
+      const options =
+        service.kind === "kiro_subscription"
+          ? kiroLoginOptions(kiroLogin)
+          : undefined;
+      const result = options
+        ? await beginServiceAuthorization(service.id, flow, options)
+        : await beginServiceAuthorization(service.id, flow);
       presentAuthorization(service, flow, result.session);
       await onRefresh();
     } catch (cause) {
@@ -2643,70 +2679,82 @@ export function ServiceManager({
                 })}
               </DialogTitle>
               <DialogDescription>
-                {deviceCodeOnlyKind(shownLoginChoice?.kind)
-                  ? deviceCodeKindHint(shownLoginChoice?.kind)
-                  : officialClaude(shownLoginChoice)
-                    ? t("services.claudeOfficialHint")
-                    : shownLoginChoice?.kind === "claude_subscription"
-                      ? t("services.claudeOauthHint")
-                      : shownLoginChoice?.kind === "antigravity_subscription"
-                        ? t("services.antigravityHint")
-                        : t("services.chooseOauthHint")}
+                {shownLoginChoice?.kind === "kiro_subscription"
+                  ? t("services.kiroHint")
+                  : deviceCodeOnlyKind(shownLoginChoice?.kind)
+                    ? deviceCodeKindHint(shownLoginChoice?.kind)
+                    : officialClaude(shownLoginChoice)
+                      ? t("services.claudeOfficialHint")
+                      : shownLoginChoice?.kind === "claude_subscription"
+                        ? t("services.claudeOauthHint")
+                        : shownLoginChoice?.kind === "antigravity_subscription"
+                          ? t("services.antigravityHint")
+                          : t("services.chooseOauthHint")}
               </DialogDescription>
             </DialogHeader>
-            <RadioGroup
-              aria-label={t("services.loginMethod")}
-              className="grid grid-cols-2 gap-2 max-[520px]:grid-cols-1"
-              onValueChange={(value) =>
-                setLoginChoiceFlow(value as AuthorizationFlow)
-              }
-              value={shownLoginChoiceFlow ?? ""}
-            >
-              {officialClaude(shownLoginChoice) ? (
-                <ChoiceCard
-                  label={t("services.claudeOfficial")}
-                  description={t("services.claudeOfficialHint")}
-                  selected={shownLoginChoiceFlow === "claude_cli"}
-                  value="claude_cli"
-                />
-              ) : shownLoginChoice?.kind === "claude_subscription" ? (
-                <ChoiceCard
-                  label={t("services.claudeOauth")}
-                  description={t("services.claudeOauthHint")}
-                  selected={shownLoginChoiceFlow === "authorization_code"}
-                  value="authorization_code"
-                />
-              ) : deviceCodeOnlyKind(shownLoginChoice?.kind) ? (
-                <ChoiceCard
-                  label="Device Code"
-                  description={deviceCodeKindHint(shownLoginChoice?.kind)}
-                  selected={shownLoginChoiceFlow === "device_code"}
-                  value="device_code"
-                />
-              ) : shownLoginChoice?.kind === "antigravity_subscription" ? (
-                <ChoiceCard
-                  label={t("services.browserOauth")}
-                  description={t("services.antigravityHint")}
-                  selected={shownLoginChoiceFlow === "browser"}
-                  value="browser"
-                />
-              ) : (
-                <>
+            {shownLoginChoice?.kind === "kiro_subscription" ? (
+              <KiroAuthorizationEditor
+                value={kiroLogin}
+                onChange={(next) => {
+                  setKiroLogin(next);
+                  setLoginChoiceFlow(kiroLoginFlow(next));
+                }}
+              />
+            ) : (
+              <RadioGroup
+                aria-label={t("services.loginMethod")}
+                className="grid grid-cols-2 gap-2 max-[520px]:grid-cols-1"
+                onValueChange={(value) =>
+                  setLoginChoiceFlow(value as AuthorizationFlow)
+                }
+                value={shownLoginChoiceFlow ?? ""}
+              >
+                {officialClaude(shownLoginChoice) ? (
                   <ChoiceCard
-                    description={t("services.browserOauthHint")}
-                    label={t("services.browserOauth")}
-                    selected={shownLoginChoiceFlow === "browser"}
-                    value="browser"
+                    label={t("services.claudeOfficial")}
+                    description={t("services.claudeOfficialHint")}
+                    selected={shownLoginChoiceFlow === "claude_cli"}
+                    value="claude_cli"
                   />
+                ) : shownLoginChoice?.kind === "claude_subscription" ? (
                   <ChoiceCard
-                    description={t("services.deviceCodeHint")}
+                    label={t("services.claudeOauth")}
+                    description={t("services.claudeOauthHint")}
+                    selected={shownLoginChoiceFlow === "authorization_code"}
+                    value="authorization_code"
+                  />
+                ) : deviceCodeOnlyKind(shownLoginChoice?.kind) ? (
+                  <ChoiceCard
                     label="Device Code"
+                    description={deviceCodeKindHint(shownLoginChoice?.kind)}
                     selected={shownLoginChoiceFlow === "device_code"}
                     value="device_code"
                   />
-                </>
-              )}
-            </RadioGroup>
+                ) : shownLoginChoice?.kind === "antigravity_subscription" ? (
+                  <ChoiceCard
+                    label={t("services.browserOauth")}
+                    description={t("services.antigravityHint")}
+                    selected={shownLoginChoiceFlow === "browser"}
+                    value="browser"
+                  />
+                ) : (
+                  <>
+                    <ChoiceCard
+                      description={t("services.browserOauthHint")}
+                      label={t("services.browserOauth")}
+                      selected={shownLoginChoiceFlow === "browser"}
+                      value="browser"
+                    />
+                    <ChoiceCard
+                      description={t("services.deviceCodeHint")}
+                      label="Device Code"
+                      selected={shownLoginChoiceFlow === "device_code"}
+                      value="device_code"
+                    />
+                  </>
+                )}
+              </RadioGroup>
+            )}
             {officialClaude(shownLoginChoice) ? <ClaudeCLINotice /> : null}
             <DialogFooter>
               <Button
@@ -2720,7 +2768,11 @@ export function ServiceManager({
                 {t("common.cancel")}
               </Button>
               <Button
-                disabled={shownLoginChoiceFlow === null}
+                disabled={
+                  shownLoginChoiceFlow === null ||
+                  (shownLoginChoice?.kind === "kiro_subscription" &&
+                    !kiroLoginValid(kiroLogin))
+                }
                 onClick={() => {
                   if (loginChoice && loginChoiceFlow) {
                     void authorize(loginChoice, loginChoiceFlow);
@@ -2744,7 +2796,11 @@ export function ServiceManager({
                   {authorizationDialog.session.flow === "claude_cli"
                     ? t("services.claudeCLI.loginTitle")
                     : authorizationDialog.session.flow === "authorization_code"
-                      ? t("services.claudeOauth")
+                      ? t(
+                          authorizationDialog.session.provider === "kiro"
+                            ? "services.kiroCallbackTitle"
+                            : "services.claudeOauth",
+                        )
                       : t("services.deviceCodeTitle")}
                 </DialogTitle>
                 <DialogDescription>
@@ -2753,13 +2809,18 @@ export function ServiceManager({
                       ? t("services.claudeCLI.loginHintServer")
                       : t("services.claudeCLI.loginHintDesktop")
                     : authorizationDialog.session.flow === "authorization_code"
-                      ? t("services.claudeOauthHint")
+                      ? t(
+                          authorizationDialog.session.provider === "kiro"
+                            ? "services.kiroCallbackHint"
+                            : "services.claudeOauthHint",
+                        )
                       : deviceCodeDescription(
                           authorizationDialog.session.provider,
                         )}
                 </DialogDescription>
               </DialogHeader>
-              {authorizationDialog.requestedFlow === "browser" ? (
+              {authorizationDialog.requestedFlow === "browser" &&
+              authorizationDialog.session.provider !== "kiro" ? (
                 <FormMessage tone="warning">
                   {t("services.portsBusyAuto")}
                 </FormMessage>
@@ -2799,17 +2860,27 @@ export function ServiceManager({
                 >
                   <Field
                     htmlFor="claude-authorization-code"
-                    label={t("services.authorizationCode")}
+                    label={t(
+                      authorizationDialog.session.provider === "kiro"
+                        ? "services.kiroCallbackURL"
+                        : "services.authorizationCode",
+                    )}
                   >
                     <Input
                       id="claude-authorization-code"
-                      aria-label={t("services.authorizationCode")}
+                      aria-label={t(
+                        authorizationDialog.session.provider === "kiro"
+                          ? "services.kiroCallbackURL"
+                          : "services.authorizationCode",
+                      )}
                       type="password"
                       autoComplete="off"
                       placeholder={
                         authorizationDialog.session.flow === "claude_cli"
                           ? undefined
-                          : "code#state"
+                          : authorizationDialog.session.provider === "kiro"
+                            ? "http://localhost:3128/oauth/callback?…"
+                            : "code#state"
                       }
                       value={authorizationCode}
                       maxLength={8192}
@@ -2854,15 +2925,17 @@ export function ServiceManager({
                 authorizationDialog.session.device_code ? (
                 <>
                   <p className="text-sm leading-6 text-muted-foreground">
-                    {authorizationDialog.session.provider === "xai_grok"
-                      ? t("services.grokEnterDeviceCode")
-                      : authorizationDialog.session.provider ===
-                          "github_copilot"
-                        ? t("services.copilotEnterDeviceCode")
+                    {authorizationDialog.session.provider === "kiro"
+                      ? t("services.kiroEnterDeviceCode")
+                      : authorizationDialog.session.provider === "xai_grok"
+                        ? t("services.grokEnterDeviceCode")
                         : authorizationDialog.session.provider ===
-                            "factory_droid"
-                          ? t("services.droidEnterDeviceCode")
-                          : t("services.enterDeviceCode")}
+                            "github_copilot"
+                          ? t("services.copilotEnterDeviceCode")
+                          : authorizationDialog.session.provider ===
+                              "factory_droid"
+                            ? t("services.droidEnterDeviceCode")
+                            : t("services.enterDeviceCode")}
                   </p>
                   <div className="flex items-center justify-between gap-3 rounded-md border border-primary/20 bg-accent p-3">
                     <code className="font-mono text-xl font-semibold tracking-[0.08em] text-accent-foreground select-all">
@@ -2887,15 +2960,17 @@ export function ServiceManager({
                     </Button>
                   </div>
                   <small className="mt-2 block text-xs text-muted-foreground">
-                    {authorizationDialog.session.provider === "xai_grok"
-                      ? t("services.grokDeviceHint")
-                      : authorizationDialog.session.provider ===
-                          "github_copilot"
-                        ? t("services.copilotDeviceHint")
+                    {authorizationDialog.session.provider === "kiro"
+                      ? t("services.kiroDeviceHint")
+                      : authorizationDialog.session.provider === "xai_grok"
+                        ? t("services.grokDeviceHint")
                         : authorizationDialog.session.provider ===
-                            "factory_droid"
-                          ? t("services.droidDeviceHint")
-                          : t("services.deviceDisabledHint")}
+                            "github_copilot"
+                          ? t("services.copilotDeviceHint")
+                          : authorizationDialog.session.provider ===
+                              "factory_droid"
+                            ? t("services.droidDeviceHint")
+                            : t("services.deviceDisabledHint")}
                   </small>
                   <DialogFooter>
                     <Button
@@ -2998,6 +3073,7 @@ export function ServiceManager({
       <ServiceModelsEditor
         key={editingServiceID ?? "create"}
         compact={draft.kind === "vertex"}
+        formatRole={draft.kind === "kiro_subscription" ? "adapter" : "upstream"}
         builtinProtocol={(model) =>
           serviceBuiltinModelProtocol(draft.kind, model)
         }
@@ -3040,12 +3116,12 @@ export function ServiceManager({
       />
     </>
   );
-  // Subscriptions keep their native protocols fixed; any other entry protocol
-  // must convert into one of the provider's egress formats.
+  // Base ingress entries stay enabled. Additional entries convert into a
+  // directly supported format, or into the provider adapter's input format.
   const subscriptionKind = isSubscriptionKind(draft.kind) ? draft.kind : null;
-  const nativeProtocols = new Set(
+  const fixedProtocols = new Set(
     subscriptionKind
-      ? subscriptionNativeCapabilities[subscriptionKind].map(
+      ? subscriptionBaseCapabilities[subscriptionKind].map(
           ({ protocol }) => protocol,
         )
       : vertexExpress
@@ -3069,7 +3145,7 @@ export function ServiceManager({
   );
   const protocolRows = subscriptionKind
     ? descriptors.filter(
-        ({ id }) => nativeProtocols.has(id) || supportsLocalConversion(id),
+        ({ id }) => fixedProtocols.has(id) || supportsLocalConversion(id),
       )
     : draft.kind === "vertex"
       ? descriptors.filter(
@@ -3082,7 +3158,13 @@ export function ServiceManager({
   const protocolEditor = (
     <Panel asChild>
       <section aria-labelledby="service-capabilities-heading">
-        <PanelHeader actions={<ProtocolModeHelp />}>
+        <PanelHeader
+          actions={
+            draft.kind === "kiro_subscription" ? undefined : (
+              <ProtocolModeHelp />
+            )
+          }
+        >
           <div className="grid min-w-0 gap-0.5">
             <strong
               className="text-sm font-semibold"
@@ -3091,19 +3173,21 @@ export function ServiceManager({
               {t("services.capabilitiesTitle")}
             </strong>
             <p className="text-xs text-muted-foreground">
-              {egressTargets
-                ? conversionEngine?.available
-                  ? t("services.capabilityHintSubscription", {
-                      targets: egressTargets
-                        .map((target) => protocolLabel(target))
-                        .join(" / "),
-                    })
-                  : t("services.capabilityHintSubscriptionUnavailable")
-                : conversionEngine?.available
-                  ? formatRoutedKind
-                    ? t("services.capabilityHintPerModel")
-                    : t("services.capabilityHintConvert")
-                  : t("services.capabilityHintPassthrough")}
+              {draft.kind === "kiro_subscription"
+                ? t("services.kiroProtocolHint")
+                : egressTargets
+                  ? conversionEngine?.available
+                    ? t("services.capabilityHintSubscription", {
+                        targets: egressTargets
+                          .map((target) => protocolLabel(target))
+                          .join(" / "),
+                      })
+                    : t("services.capabilityHintSubscriptionUnavailable")
+                  : conversionEngine?.available
+                    ? formatRoutedKind
+                      ? t("services.capabilityHintPerModel")
+                      : t("services.capabilityHintConvert")
+                    : t("services.capabilityHintPassthrough")}
             </p>
           </div>
         </PanelHeader>
@@ -3113,11 +3197,11 @@ export function ServiceManager({
             const capability = draft.capabilities.find(
               (item) => item.protocol === descriptor.id,
             );
-            const native = nativeProtocols.has(descriptor.id);
+            const fixed = fixedProtocols.has(descriptor.id);
             const followsModelFormat =
               formatRoutedKind && isModelFormat(descriptor.id);
             const convertible =
-              !native &&
+              !fixed &&
               !followsModelFormat &&
               supportsLocalConversion(descriptor.id);
             const targets = convertible
@@ -3157,7 +3241,7 @@ export function ServiceManager({
                     conversionEngine,
                   );
             const locked =
-              native || (!passthroughAllowed && !capability && !defaultTarget);
+              fixed || (!passthroughAllowed && !capability && !defaultTarget);
             return (
               <DataRow
                 className="grid grid-cols-1 gap-3 py-3 @[640px]:grid-cols-[minmax(0,1fr)_232px]"
@@ -3239,9 +3323,12 @@ export function ServiceManager({
                           key={target.id}
                           value={target.id}
                         >
-                          {t("services.convertTo", {
-                            protocol: protocolLabel(target.id),
-                          })}
+                          {t(
+                            draft.kind === "kiro_subscription"
+                              ? "services.kiroVia"
+                              : "services.convertTo",
+                            { protocol: protocolLabel(target.id) },
+                          )}
                           {/* The row badge already shows the chosen target's quality. */}
                           {target.enabled ? "" : t("services.notEnabled")}
                         </SelectItem>
@@ -3249,13 +3336,25 @@ export function ServiceManager({
                     </SelectContent>
                   </Select>
                 ) : (
-                  <span className="hidden text-xs text-muted-foreground @[640px]:block">
+                  <span
+                    className={
+                      draft.kind === "kiro_subscription"
+                        ? "text-xs text-muted-foreground"
+                        : "hidden text-xs text-muted-foreground @[640px]:block"
+                    }
+                  >
                     {capability
-                      ? native
-                        ? t("services.subscriptionNative")
-                        : followsModelFormat
-                          ? t("services.perModelFormat")
-                          : t("services.passthrough")
+                      ? draft.kind === "kiro_subscription"
+                        ? t(
+                            descriptor.id === "openai.models"
+                              ? "services.kiroLocalModels"
+                              : "services.kiroAdapter",
+                          )
+                        : fixed
+                          ? t("services.subscriptionNative")
+                          : followsModelFormat
+                            ? t("services.perModelFormat")
+                            : t("services.passthrough")
                       : ""}
                   </span>
                 )}
@@ -3286,7 +3385,9 @@ export function ServiceManager({
               ? "https://api.githubcopilot.com"
               : draft.kind === "droid_subscription"
                 ? "https://api.factory.ai"
-                : draft.baseURL.trim();
+                : draft.kind === "kiro_subscription"
+                  ? "https://codewhisperer.us-east-1.amazonaws.com"
+                  : draft.baseURL.trim();
   const connectionFields = (
     <div className="grid min-w-0 gap-4 pb-2 @[760px]:grid-cols-2">
       <Panel>
@@ -3331,17 +3432,19 @@ export function ServiceManager({
               id="service-name"
               maxLength={128}
               placeholder={
-                draft.kind === "grok_subscription"
-                  ? t("services.namePlaceholderGrok")
-                  : draft.kind === "copilot_subscription"
-                    ? t("services.namePlaceholderCopilot")
-                    : draft.kind === "droid_subscription"
-                      ? t("services.namePlaceholderDroid")
-                      : draft.kind === "antigravity_subscription"
-                        ? "Antigravity"
-                        : isSubscriptionKind(draft.kind)
-                          ? t("services.namePlaceholderCodex")
-                          : t("services.namePlaceholderHttp")
+                draft.kind === "kiro_subscription"
+                  ? "Kiro"
+                  : draft.kind === "grok_subscription"
+                    ? t("services.namePlaceholderGrok")
+                    : draft.kind === "copilot_subscription"
+                      ? t("services.namePlaceholderCopilot")
+                      : draft.kind === "droid_subscription"
+                        ? t("services.namePlaceholderDroid")
+                        : draft.kind === "antigravity_subscription"
+                          ? "Antigravity"
+                          : isSubscriptionKind(draft.kind)
+                            ? t("services.namePlaceholderCodex")
+                            : t("services.namePlaceholderHttp")
               }
               required
               value={draft.name}
@@ -3422,65 +3525,78 @@ export function ServiceManager({
                   <legend className="sr-only">
                     {t("services.loginMethod")}
                   </legend>
-                  <RadioGroup
-                    aria-label={t("services.newLoginMethod")}
-                    className="grid gap-2"
-                    onValueChange={(value) =>
-                      setDraft((current) => ({
-                        ...current,
-                        authorizationFlow: value as AuthorizationFlow,
-                      }))
-                    }
-                    value={draft.authorizationFlow ?? ""}
-                  >
-                    {draft.kind === "claude_subscription" ? (
-                      <>
+                  {draft.kind === "kiro_subscription" ? (
+                    <KiroAuthorizationEditor
+                      value={draft.kiroLogin ?? defaultKiroLoginDraft()}
+                      onChange={(next) =>
+                        setDraft((current) => ({
+                          ...current,
+                          kiroLogin: next,
+                          authorizationFlow: kiroLoginFlow(next),
+                        }))
+                      }
+                    />
+                  ) : (
+                    <RadioGroup
+                      aria-label={t("services.newLoginMethod")}
+                      className="grid gap-2"
+                      onValueChange={(value) =>
+                        setDraft((current) => ({
+                          ...current,
+                          authorizationFlow: value as AuthorizationFlow,
+                        }))
+                      }
+                      value={draft.authorizationFlow ?? ""}
+                    >
+                      {draft.kind === "claude_subscription" ? (
+                        <>
+                          <ChoiceCard
+                            label={t("services.claudeOfficial")}
+                            description={t("services.claudeOfficialHint")}
+                            selected={draft.authorizationFlow === "claude_cli"}
+                            value="claude_cli"
+                          />
+                          <ChoiceCard
+                            label={t("services.claudeLegacy")}
+                            description={t("services.claudeOauthHint")}
+                            selected={
+                              draft.authorizationFlow === "authorization_code"
+                            }
+                            value="authorization_code"
+                          />
+                        </>
+                      ) : deviceCodeOnlyKind(draft.kind) ? (
                         <ChoiceCard
-                          label={t("services.claudeOfficial")}
-                          description={t("services.claudeOfficialHint")}
-                          selected={draft.authorizationFlow === "claude_cli"}
-                          value="claude_cli"
-                        />
-                        <ChoiceCard
-                          label={t("services.claudeLegacy")}
-                          description={t("services.claudeOauthHint")}
-                          selected={
-                            draft.authorizationFlow === "authorization_code"
-                          }
-                          value="authorization_code"
-                        />
-                      </>
-                    ) : deviceCodeOnlyKind(draft.kind) ? (
-                      <ChoiceCard
-                        label="Device Code"
-                        description={deviceCodeKindHint(draft.kind)}
-                        selected
-                        value="device_code"
-                      />
-                    ) : draft.kind === "antigravity_subscription" ? (
-                      <ChoiceCard
-                        label={t("services.browserOauth")}
-                        description={t("services.antigravityHint")}
-                        selected
-                        value="browser"
-                      />
-                    ) : (
-                      <>
-                        <ChoiceCard
-                          description={t("services.browserOauthCreateHint")}
-                          label={t("services.browserOauth")}
-                          selected={draft.authorizationFlow === "browser"}
-                          value="browser"
-                        />
-                        <ChoiceCard
-                          description={t("services.deviceCodeCreateHint")}
                           label="Device Code"
-                          selected={draft.authorizationFlow === "device_code"}
+                          description={deviceCodeKindHint(draft.kind)}
+                          selected
                           value="device_code"
                         />
-                      </>
-                    )}
-                  </RadioGroup>
+                      ) : draft.kind === "antigravity_subscription" ? (
+                        <ChoiceCard
+                          label={t("services.browserOauth")}
+                          description={t("services.antigravityHint")}
+                          selected
+                          value="browser"
+                        />
+                      ) : (
+                        <>
+                          <ChoiceCard
+                            description={t("services.browserOauthCreateHint")}
+                            label={t("services.browserOauth")}
+                            selected={draft.authorizationFlow === "browser"}
+                            value="browser"
+                          />
+                          <ChoiceCard
+                            description={t("services.deviceCodeCreateHint")}
+                            label="Device Code"
+                            selected={draft.authorizationFlow === "device_code"}
+                            value="device_code"
+                          />
+                        </>
+                      )}
+                    </RadioGroup>
+                  )}
                   {draft.authorizationFlow === null ? (
                     <small className="mt-2 block text-warning-foreground">
                       {t("services.chooseLoginContinue")}
@@ -4012,6 +4128,11 @@ export function ServiceManager({
                   </HelpPopover>
                 ) : null}
                 <ServiceEditorTour
+                  protocolHint={
+                    draft.kind === "kiro_subscription"
+                      ? t("services.kiroProtocolHint")
+                      : undefined
+                  }
                   modelCount={draft.models.length}
                   protocols={draft.capabilities.map(
                     (capability) => capability.protocol,
@@ -4137,7 +4258,11 @@ export function ServiceManager({
                   saving ||
                   (view.kind === "create" &&
                     isSubscriptionKind(draft.kind) &&
-                    draft.authorizationFlow === null)
+                    (draft.authorizationFlow === null ||
+                      (draft.kind === "kiro_subscription" &&
+                        !kiroLoginValid(
+                          draft.kiroLogin ?? defaultKiroLoginDraft(),
+                        ))))
                 }
                 type="submit"
               >

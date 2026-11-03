@@ -208,6 +208,9 @@ func NewWithDependencies(version contract.VersionResponse, dependencies Dependen
 
 func newHandler(version contract.VersionResponse, dependencies Dependencies) (*Handler, error) {
 	capabilities := contract.DefaultCapabilitiesResponse()
+	if dependencies.Subscriptions != nil {
+		capabilities.PlanTypes = append(capabilities.PlanTypes, contract.PlanTypeDescriptor{ID: contract.PlanTypeAdapter, UsesLocalConversion: true})
+	}
 	if dependencies.ConversionEngine != nil {
 		capabilities.ConversionEngine = relaykitbridge.Descriptor(dependencies.ConversionEngine)
 	}

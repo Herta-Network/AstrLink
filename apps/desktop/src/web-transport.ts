@@ -303,7 +303,7 @@ const commands: Record<string, Command> = {
     const value = (await route(
       (a) => `${service(a)}/authorization`,
       "POST",
-      (a) => ({ flow: a.flow }),
+      (a) => ({ flow: a.flow, ...(a.kiro ? { kiro: a.kiro } : {}) }),
     )(a)) as Args;
     const url =
       (value.device_code as Args | undefined)?.verification_url ??

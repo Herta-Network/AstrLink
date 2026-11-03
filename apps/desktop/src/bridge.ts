@@ -1,3 +1,4 @@
+import type { KiroAuthorization } from "./subscription-model";
 import { isWebEdition } from "./edition";
 import { webInvoke, RAW_CHANGED } from "./web-transport";
 import {
@@ -662,10 +663,15 @@ export async function probeServiceProxy(
 export async function beginServiceAuthorization(
   serviceId: string,
   flow: AuthorizationFlow,
+  kiro?: KiroAuthorization,
 ): Promise<BeginCodexAuthorizationResult> {
   requireNativeBridge();
   return parseBeginCodexAuthorizationResult(
-    await invoke<unknown>("begin_service_authorization", { serviceId, flow }),
+    await invoke<unknown>("begin_service_authorization", {
+      serviceId,
+      flow,
+      ...(kiro ? { kiro } : {}),
+    }),
   );
 }
 

@@ -29,6 +29,28 @@ import {
 const createdAt = "2026-07-28T12:00:00Z";
 
 describe("service model", () => {
+  it("reads Kiro adapter entries", () => {
+    const source = {
+      id: "service_kiro",
+      name: "Kiro",
+      kind: "kiro_subscription",
+      enabled: true,
+      models: [],
+      capabilities: [
+        { protocol: "anthropic.messages", mode: "adapter", streaming: true },
+        { protocol: "openai.models", mode: "adapter", streaming: false },
+      ],
+      subscription: { provider: "kiro", status: "disconnected" },
+      created_at: createdAt,
+      updated_at: createdAt,
+    };
+    const parsed = parseService(source);
+    expect(parsed.capabilities.map((capability) => capability.mode)).toEqual([
+      "adapter",
+      "adapter",
+    ]);
+  });
+
   it("reads saved Vertex providers with an implicit project or Express key", () => {
     for (const scheme of [
       "google_service_account",

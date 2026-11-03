@@ -45,7 +45,7 @@ func newRelayKitResponseWriter(
 	}
 	if plan.Streaming {
 		stream, err := engine.NewResponseStream(context.Background(), relaykitbridge.StreamOptions{
-			From: plan.UpstreamProtocol, To: plan.InputProtocol, PublicModel: publicModel,
+			From: plan.ProcessingProtocol(), To: plan.InputProtocol, PublicModel: publicModel,
 			UpstreamModel: upstreamModel, State: state,
 		})
 		if err != nil {
@@ -104,7 +104,7 @@ func (writer *relayKitResponseWriter) Finish() error {
 	defer func() { _ = writer.streamClose() }()
 	if !writer.streaming {
 		output, err := writer.engine.ConvertResponse(context.Background(), relaykitbridge.ConvertResponseInput{
-			From: writer.plan.UpstreamProtocol, To: writer.plan.InputProtocol, StatusCode: writer.status,
+			From: writer.plan.ProcessingProtocol(), To: writer.plan.InputProtocol, StatusCode: writer.status,
 			ContentType: writer.Header().Get("Content-Type"), Body: writer.body.Bytes(), PublicModel: writer.publicModel,
 			UpstreamModel: writer.upstreamModel, State: writer.state,
 		})
