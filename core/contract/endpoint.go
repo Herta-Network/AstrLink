@@ -23,18 +23,19 @@ const (
 	EndpointKindCustom           = ServiceKindCustom
 )
 
-// CapabilityMode is a legacy passthrough label. Native and delegated both
-// forward the ingress protocol unchanged; new writes use native. Local
-// conversion is declared on Capability.ConvertTo, not as a mode.
+// CapabilityMode distinguishes protocol-preserving forwarding from a built-in
+// provider adapter. ConvertTo selects an optional standard intermediate format
+// before forwarding or provider adaptation.
 type CapabilityMode string
 
 const (
 	CapabilityModeNative    CapabilityMode = "native"
 	CapabilityModeDelegated CapabilityMode = "delegated"
+	CapabilityModeAdapter   CapabilityMode = "adapter"
 )
 
 func (mode CapabilityMode) Valid() bool {
-	return mode == CapabilityModeNative || mode == CapabilityModeDelegated
+	return mode == CapabilityModeNative || mode == CapabilityModeDelegated || mode == CapabilityModeAdapter
 }
 
 type AuthScheme string

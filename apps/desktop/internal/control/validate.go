@@ -589,7 +589,7 @@ func validatePackageStrategy(value string) error {
 }
 
 var (
-	subscriptionProviders        = []string{"openai_codex", "claude_code", "xai_grok", "antigravity", "github_copilot", "factory_droid"}
+	subscriptionProviders        = []string{"openai_codex", "claude_code", "xai_grok", "antigravity", "github_copilot", "factory_droid", "kiro"}
 	authorizationSessionStatuses = []string{"pending", "completed", "cancelled", "expired", "failed"}
 	authorizationFlows           = []string{"browser", "device_code", "authorization_code", "claude_cli"}
 )

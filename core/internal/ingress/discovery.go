@@ -190,7 +190,7 @@ func (handler *Handler) fetchModelDiscovery(
 		// Preserve the original M1 seam: an omitted mode is native.
 		mode = contract.CapabilityModeNative
 	}
-	if _, planErr := planner.BuildAlpha(planner.AlphaInput{
+	if _, planErr := planner.BuildDirect(planner.AlphaInput{
 		Service:   candidate.Service,
 		Protocol:  classified.Protocol,
 		Mode:      mode,
@@ -220,7 +220,7 @@ func (handler *Handler) fetchModelDiscovery(
 		}}
 	}
 
-	if candidate.Service.Kind == contract.ServiceKindDroidSubscription || candidate.Service.Kind == contract.ServiceKindVertex {
+	if candidate.Service.Kind == contract.ServiceKindDroidSubscription || candidate.Service.Kind == contract.ServiceKindKiroSubscription || candidate.Service.Kind == contract.ServiceKindVertex {
 		// These providers expose configured models; Vertex catalog discovery belongs in the editor.
 		entries, synthesizeErr := synthesizeDiscoveryEntries(classified.Protocol, candidate.Service.Models)
 		if synthesizeErr != nil {

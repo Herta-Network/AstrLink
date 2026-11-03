@@ -92,14 +92,18 @@ func verifyCapabilities(capabilities Capabilities) error {
 		return errors.New("unavailable RelayKit capability must not advertise a version or conversion edges")
 	}
 
-	expectedPlans := []struct {
+	type planExpectation struct {
 		id              string
 		available       bool
 		localConversion bool
-	}{
+	}
+	expectedPlans := []planExpectation{
 		{"native", true, false},
 		{"delegated", true, false},
 		{"relaykit", false, true},
+	}
+	if len(capabilities.PlanTypes) == len(expectedPlans)+1 {
+		expectedPlans = append(expectedPlans, planExpectation{"adapter", false, true})
 	}
 	if len(capabilities.PlanTypes) != len(expectedPlans) {
 		return errors.New("Core returned an unexpected Alpha plan registry")

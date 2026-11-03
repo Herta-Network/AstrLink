@@ -262,13 +262,13 @@ func validateRoutingSettings(value any, patch bool) error {
 		case "default_failure_policy":
 			err = validateFailurePolicy(value)
 		case "allow_unmatched_failover", "codex_identity_enforcement", "claude_identity_enforcement",
-			"grok_identity_enforcement", "official_client_passthrough", "subscription_risk_protection",
+			"grok_identity_enforcement", "kiro_identity_enforcement", "official_client_passthrough", "subscription_risk_protection",
 			"codex_request_normalization", "claude_request_normalization", "subscription_session_isolation",
-			"claude_identity_auto_learn", "codex_identity_auto_learn", "grok_identity_auto_learn", "system_prompt_enabled":
+			"claude_identity_auto_learn", "codex_identity_auto_learn", "grok_identity_auto_learn", "kiro_identity_auto_learn", "system_prompt_enabled":
 			if _, ok := asBool(value); !ok {
 				return errors.New("invalid routing settings field")
 			}
-		case "claude_identity_version", "codex_identity_version", "grok_identity_version":
+		case "claude_identity_version", "codex_identity_version", "grok_identity_version", "kiro_identity_version":
 			err = validateIdentityVersion(value)
 		case "system_prompt_prefix", "system_prompt_suffix":
 			if text, ok := asString(value); !ok || runeCount(text) > maxSystemPromptChars {

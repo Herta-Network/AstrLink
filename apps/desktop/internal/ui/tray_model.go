@@ -58,6 +58,7 @@ var subscriptionKinds = []string{
 	"antigravity_subscription",
 	"copilot_subscription",
 	"droid_subscription",
+	"kiro_subscription",
 	"kimi_coding",
 	"glm_coding",
 	"minimax_coding",

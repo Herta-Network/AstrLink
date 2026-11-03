@@ -16,7 +16,7 @@ import (
 // learned.
 func learnedIdentityProvider(provider contract.SubscriptionProvider) error {
 	switch provider {
-	case contract.SubscriptionProviderClaudeCode, contract.SubscriptionProviderOpenAICodex, contract.SubscriptionProviderXAIGrok:
+	case contract.SubscriptionProviderClaudeCode, contract.SubscriptionProviderOpenAICodex, contract.SubscriptionProviderXAIGrok, contract.SubscriptionProviderKiro:
 		return nil
 	}
 	return fmt.Errorf("%w: unsupported learned identity provider", storagecontract.ErrInvalidArgument)

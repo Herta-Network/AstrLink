@@ -35,6 +35,7 @@ func TestBeginAuthorizationUsesOfficialPublicClientByDefault(t *testing.T) {
 		context.Background(),
 		"service_test",
 		contract.AuthorizationFlowBrowser,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("Begin() = %v", err)
@@ -136,6 +137,7 @@ func testCallbackProxy(t *testing.T, useProxy bool) {
 		context.Background(),
 		"service_test01",
 		contract.AuthorizationFlowBrowser,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("Begin() error = %v", err)
@@ -227,6 +229,7 @@ func TestSessionCompletionReleasesGlobalLockAndLogoutWaits(t *testing.T) {
 		context.Background(),
 		completingService,
 		contract.AuthorizationFlowBrowser,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("Begin(primary) = %v", err)
@@ -235,6 +238,7 @@ func TestSessionCompletionReleasesGlobalLockAndLogoutWaits(t *testing.T) {
 		context.Background(),
 		otherService,
 		contract.AuthorizationFlowBrowser,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("Begin(other) = %v", err)
@@ -321,6 +325,7 @@ func TestStateMismatchFailsClosed(t *testing.T) {
 		context.Background(),
 		"service_test02",
 		contract.AuthorizationFlowBrowser,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("Begin() error = %v", err)
@@ -361,6 +366,7 @@ func TestBrowserAuthorizationUsesFallbackPortThenDeviceCode(t *testing.T) {
 		context.Background(),
 		"service_port_fallback",
 		contract.AuthorizationFlowBrowser,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("Begin() fallback port = %v", err)
@@ -405,6 +411,7 @@ func TestBrowserAuthorizationUsesFallbackPortThenDeviceCode(t *testing.T) {
 		context.Background(),
 		"service_device_fallback",
 		contract.AuthorizationFlowBrowser,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("Begin() device fallback = %v", err)
@@ -426,6 +433,7 @@ func TestBrowserAuthorizationUsesFallbackPortThenDeviceCode(t *testing.T) {
 		context.Background(),
 		"service_device_explicit",
 		contract.AuthorizationFlowDeviceCode,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("Begin() explicit Device Code with both ports occupied = %v", err)
@@ -531,6 +539,7 @@ func testDeviceProxy(t *testing.T, useProxy bool) {
 		context.Background(),
 		"service_device_success",
 		contract.AuthorizationFlowDeviceCode,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("Begin() = %v", err)
@@ -602,6 +611,7 @@ func TestDeviceCodeCancellationPreventsLateCompletion(t *testing.T) {
 		context.Background(),
 		"service_device_cancel",
 		contract.AuthorizationFlowDeviceCode,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("Begin() = %v", err)
@@ -646,6 +656,7 @@ func TestDeviceCodeUnavailableAndExpiryAreSanitized(t *testing.T) {
 				context.Background(),
 				"service_device_unavailable",
 				contract.AuthorizationFlowDeviceCode,
+				nil,
 			)
 			if !errors.Is(err, accountauth.ErrDeviceCodeUnavailable) {
 				t.Fatalf("Begin() = %v, want ErrDeviceCodeUnavailable", err)
@@ -676,6 +687,7 @@ func TestDeviceCodeUnavailableAndExpiryAreSanitized(t *testing.T) {
 		context.Background(),
 		"service_device_expiry",
 		contract.AuthorizationFlowDeviceCode,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("Begin() = %v", err)
@@ -722,6 +734,7 @@ func TestDeviceCodeNetworkFailureEndsPendingSession(t *testing.T) {
 		context.Background(),
 		"service_device_network",
 		contract.AuthorizationFlowDeviceCode,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("Begin() = %v", err)

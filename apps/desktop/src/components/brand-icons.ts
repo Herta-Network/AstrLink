@@ -25,6 +25,7 @@ export { default as GooseMono } from "@lobehub/icons/es/Goose/components/Mono";
 export { default as GrokMono } from "@lobehub/icons/es/Grok/components/Mono";
 export { default as HunyuanColor } from "@lobehub/icons/es/Hunyuan/components/Color";
 export { default as KiloCodeMono } from "@lobehub/icons/es/KiloCode/components/Mono";
+export { default as KiroMono } from "@lobehub/icons/es/Kiro/components/Mono";
 export { default as KimiMono } from "@lobehub/icons/es/Kimi/components/Mono";
 export { default as LobeHubColor } from "@lobehub/icons/es/LobeHub/components/Color";
 export { default as MetaColor } from "@lobehub/icons/es/Meta/components/Color";

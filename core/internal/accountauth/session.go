@@ -22,6 +22,7 @@ import (
 const maxPendingAuthorizationSessions = 3
 
 type sessionSecrets struct {
+	kiro         *kiroAuthorizationState
 	proxyContext context.Context
 	state        string
 	pkce         PkceCodes
@@ -78,7 +79,11 @@ func (manager *SessionManager) Begin(
 	ctx context.Context,
 	serviceID contract.ServiceID,
 	flow contract.AuthorizationFlow,
+	kiroOptions *contract.KiroAuthorization,
 ) (contract.AuthorizationSession, error) {
+	if kiroOptions != nil && manager.config.Provider != contract.SubscriptionProviderKiro {
+		return contract.AuthorizationSession{}, fmt.Errorf("Kiro options require a Kiro subscription")
+	}
 	if err := serviceID.Validate(); err != nil {
 		return contract.AuthorizationSession{}, err
 	}
@@ -89,7 +94,7 @@ func (manager *SessionManager) Begin(
 		if flow != contract.AuthorizationFlowCode {
 			return contract.AuthorizationSession{}, fmt.Errorf("Claude Code requires authorization_code flow")
 		}
-	} else if flow == contract.AuthorizationFlowCode {
+	} else if flow == contract.AuthorizationFlowCode && manager.config.Provider != contract.SubscriptionProviderKiro {
 		return contract.AuthorizationSession{}, fmt.Errorf("authorization_code flow is unavailable for this provider")
 	}
 	if manager.config.Provider == contract.SubscriptionProviderXAIGrok && flow != contract.AuthorizationFlowDeviceCode {
@@ -98,6 +103,7 @@ func (manager *SessionManager) Begin(
 	if manager.config.Provider == contract.SubscriptionProviderGitHubCopilot && flow != contract.AuthorizationFlowDeviceCode {
 		return contract.AuthorizationSession{}, fmt.Errorf("GitHub Copilot requires device_code flow")
 	}
+
 	if manager.config.Provider == contract.SubscriptionProviderFactoryDroid && flow != contract.AuthorizationFlowDeviceCode {
 		return contract.AuthorizationSession{}, fmt.Errorf("Factory Droid requires device_code flow")
 	}
@@ -124,6 +130,14 @@ func (manager *SessionManager) Begin(
 	if manager.config.Provider == contract.SubscriptionProviderFactoryDroid {
 		return manager.beginPolledDeviceAuthorization(ctx, serviceID,
 			manager.requestDroidDeviceAuthorization, manager.pollDroidDeviceAuthorizationOnce, "Factory")
+	}
+
+	if manager.config.Provider == contract.SubscriptionProviderKiro {
+		options := contract.KiroAuthorization{}
+		if kiroOptions != nil {
+			options = *kiroOptions
+		}
+		return manager.beginKiroAuthorization(ctx, serviceID, flow, options)
 	}
 
 	switch flow {

@@ -95,7 +95,7 @@ func (fixture *officialFixture) signedIn(t *testing.T, id contract.ServiceID) bo
 
 func (fixture *officialFixture) login(t *testing.T, id contract.ServiceID, code string) contract.AuthorizationSession {
 	t.Helper()
-	session, err := fixture.manager.BeginAuthorization(context.Background(), id, contract.AuthorizationFlowClaudeCLI)
+	session, err := fixture.manager.BeginAuthorization(context.Background(), id, contract.AuthorizationFlowClaudeCLI, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,10 +111,10 @@ func TestOfficialLoginConnectsWithoutStoredToken(t *testing.T) {
 	fixture := newOfficialFixture(t, fakeclaude.Settings{Code: "good-code", Account: officialTestAccount}, id)
 	ctx := context.Background()
 
-	if _, err := fixture.manager.BeginAuthorization(ctx, id, contract.AuthorizationFlowCode); err == nil {
+	if _, err := fixture.manager.BeginAuthorization(ctx, id, contract.AuthorizationFlowCode, nil); err == nil {
 		t.Fatal("an official account started AstrLink's own OAuth sign-in")
 	}
-	session, err := fixture.manager.BeginAuthorization(ctx, id, contract.AuthorizationFlowClaudeCLI)
+	session, err := fixture.manager.BeginAuthorization(ctx, id, contract.AuthorizationFlowClaudeCLI, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestOfficialCancelRestoresTheAccountState(t *testing.T) {
 	fixture := newOfficialFixture(t, fakeclaude.Settings{Code: "good-code", Account: officialTestAccount}, id)
 	ctx := context.Background()
 
-	if _, err := fixture.manager.BeginAuthorization(ctx, id, contract.AuthorizationFlowClaudeCLI); err != nil {
+	if _, err := fixture.manager.BeginAuthorization(ctx, id, contract.AuthorizationFlowClaudeCLI, nil); err != nil {
 		t.Fatal(err)
 	}
 	cancelled, err := fixture.manager.CancelAuthorization(ctx, id)
@@ -204,7 +204,7 @@ func TestOfficialCancelRestoresTheAccountState(t *testing.T) {
 	}
 
 	fixture.login(t, id, "good-code")
-	if _, err := fixture.manager.BeginAuthorization(ctx, id, contract.AuthorizationFlowClaudeCLI); err != nil {
+	if _, err := fixture.manager.BeginAuthorization(ctx, id, contract.AuthorizationFlowClaudeCLI, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := fixture.manager.CancelAuthorization(ctx, id); err != nil {
@@ -276,7 +276,7 @@ func TestLegacyClaudeRefusesTheCLISignIn(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := fixture.manager.BeginAuthorization(context.Background(), id, contract.AuthorizationFlowClaudeCLI)
+	_, err := fixture.manager.BeginAuthorization(context.Background(), id, contract.AuthorizationFlowClaudeCLI, nil)
 	if err == nil || !strings.Contains(err.Error(), "only official Claude accounts") {
 		t.Fatalf("BeginAuthorization error = %v", err)
 	}

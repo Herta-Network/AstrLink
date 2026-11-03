@@ -977,7 +977,7 @@ func (session *recordSession) beginNetworkAttempt(
 	session.attemptIndex++
 	session.startedAt = time.Now().UTC()
 	session.networkAttemptOpen = true
-	session.upstreamScanner = newUsageScanner(plan.UpstreamProtocol, session.classified.Streaming)
+	session.upstreamScanner = newUsageScanner(plan.ProcessingProtocol(), session.classified.Streaming)
 	session.noteSelected(candidate, plan)
 	session.addImageCompressionEvent(images)
 	session.attemptImages = images

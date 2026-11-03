@@ -95,6 +95,11 @@ func (handler *Handler) ServeServiceTest(
 			ConversionPath: []contract.ConversionEdge{},
 		},
 	}
+	if service.Kind == contract.ServiceKindKiroSubscription {
+		execution.plan = contract.AdaptKiroPlan(execution.plan)
+		planType = contract.PlanTypeAdapter
+		mode = contract.CapabilityModeAdapter
+	}
 	disabled := false
 	policy := contract.FailurePolicy{
 		NetworkError: contract.FailureStop, ResponseTimeout: contract.FailureStop,

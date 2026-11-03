@@ -19,7 +19,7 @@ import {
 } from "./failure-policy-model";
 import { useT } from "./i18n";
 
-const providers = ["Codex", "Claude", "Grok"] as const;
+const providers = ["Codex", "Claude", "Grok", "Kiro"] as const;
 
 const protectionLabels = {
   official_client_passthrough: "officialPassthrough",
@@ -48,6 +48,11 @@ const learnedClients: readonly {
     client: "grok",
     learn: "grok_identity_auto_learn",
     version: "grok_identity_version",
+  },
+  {
+    client: "kiro",
+    learn: "kiro_identity_auto_learn",
+    version: "kiro_identity_version",
   },
 ];
 

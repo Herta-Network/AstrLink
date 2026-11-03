@@ -151,6 +151,7 @@ func (registry *IdentityRegistry) ClientIdentities() contract.ClientIdentities {
 		Codex:  contract.ClientIdentityStatus{BuiltinVersion: DefaultCodexModelsClientVersion},
 		Claude: contract.ClientIdentityStatus{BuiltinVersion: claudeCLIVersion},
 		Grok:   contract.ClientIdentityStatus{BuiltinVersion: DefaultGrokCLIClientVersion},
+		Kiro:   contract.ClientIdentityStatus{BuiltinVersion: DefaultKiroClientVersion},
 	}
 	if learned, ok := registry.learnedIdentity(contract.SubscriptionProviderOpenAICodex); ok {
 		identities.Codex.LearnedVersion = learned.Version
@@ -160,6 +161,9 @@ func (registry *IdentityRegistry) ClientIdentities() contract.ClientIdentities {
 	}
 	if learned, ok := registry.learnedIdentity(contract.SubscriptionProviderXAIGrok); ok {
 		identities.Grok.LearnedVersion = learned.Version
+	}
+	if learned, ok := registry.learnedIdentity(contract.SubscriptionProviderKiro); ok {
+		identities.Kiro.LearnedVersion = learned.Version
 	}
 	return identities
 }
@@ -369,6 +373,9 @@ func decodeLearnedIdentity(provider contract.SubscriptionProvider, document []by
 // stored identity: a supported, bounded, printable, self-consistent tuple
 // within the provider's version range that carries no gateway branding.
 func validLearnedIdentity(provider contract.SubscriptionProvider, identity ClientIdentity) bool {
+	if provider == contract.SubscriptionProviderKiro {
+		return validLearnedKiro(identity)
+	}
 	var product, floor, baseline string
 	switch provider {
 	case contract.SubscriptionProviderXAIGrok:

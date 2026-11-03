@@ -439,6 +439,7 @@ func TestIdentityRegistryReportsLearnedAndBuiltinVersions(t *testing.T) {
 		Codex:  contract.ClientIdentityStatus{BuiltinVersion: DefaultCodexIdentity().Version},
 		Claude: contract.ClientIdentityStatus{BuiltinVersion: DefaultClaudeIdentity().Version},
 		Grok:   contract.ClientIdentityStatus{BuiltinVersion: DefaultGrokCLIClientVersion},
+		Kiro:   contract.ClientIdentityStatus{BuiltinVersion: DefaultKiroClientVersion},
 	}
 	var none *IdentityRegistry
 	if got := none.ClientIdentities(); got != builtin {

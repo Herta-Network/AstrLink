@@ -178,5 +178,13 @@ func forbiddenMediaAddress(address netip.Addr) bool {
 }
 
 func allowedMediaMIME(mimeType string) bool {
-	return strings.HasPrefix(mimeType, "image/") || strings.HasPrefix(mimeType, "audio/") || mimeType == "application/pdf"
+	if strings.HasPrefix(mimeType, "image/") || strings.HasPrefix(mimeType, "audio/") {
+		return true
+	}
+	switch mimeType {
+	case "application/pdf", "text/plain", "text/csv", "text/html", "text/markdown", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+		return true
+	default:
+		return false
+	}
 }

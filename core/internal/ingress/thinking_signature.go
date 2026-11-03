@@ -17,7 +17,7 @@ const thinkingSignatureRecoveryReason = "thinking_signature_repair"
 // as DeepSeek and Kimi require thinking to be passed back unchanged. Unknown
 // models are deliberately excluded, even when they accept the Messages API.
 func supportsThinkingSignatureRecovery(plan contract.ExecutionPlan, model string) bool {
-	if plan.Type == contract.PlanTypeRelayKit || plan.InputProtocol != contract.ProtocolAnthropicMessages || plan.UpstreamProtocol != contract.ProtocolAnthropicMessages {
+	if plan.UsesRelayKit() || plan.InputProtocol != contract.ProtocolAnthropicMessages || plan.ProcessingProtocol() != contract.ProtocolAnthropicMessages {
 		return false
 	}
 	model = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(model)), "anthropic/")

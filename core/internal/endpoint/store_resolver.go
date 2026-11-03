@@ -482,7 +482,7 @@ func planService(candidate contract.Service, request ResolveRequest, subscriptio
 			skip = reason
 		}
 	}
-	for _, mode := range []contract.CapabilityMode{contract.CapabilityModeNative, contract.CapabilityModeDelegated} {
+	for _, mode := range []contract.CapabilityMode{contract.CapabilityModeNative, contract.CapabilityModeDelegated, contract.CapabilityModeAdapter} {
 		if !supportsRequest(candidate, request, mode) {
 			narrow(capabilitySkip(candidate, request.Protocol, request, mode))
 			continue
@@ -491,7 +491,7 @@ func planService(candidate contract.Service, request ResolveRequest, subscriptio
 		if format := candidate.ModelProtocol(request.Model); format != "" && request.Protocol.IsModelFormat() {
 			// The model's format decides how the provider is called; enabled
 			// protocols only choose which clients may enter.
-			if mode != contract.CapabilityModeNative {
+			if mode != contract.CapabilityModeNative && mode != contract.CapabilityModeAdapter {
 				continue
 			}
 			upstreamProtocol = format
@@ -502,6 +502,18 @@ func planService(candidate contract.Service, request ResolveRequest, subscriptio
 				}
 				planType = contract.PlanTypeRelayKit
 			}
+		}
+		if candidate.Kind == contract.ServiceKindKiroSubscription {
+			for _, capability := range candidate.Capabilities {
+				if capability.Protocol == request.Protocol && capability.Mode == mode && capability.ConvertTo != "" && candidate.ModelProtocol(request.Model) == "" {
+					upstreamProtocol = capability.ConvertTo
+				}
+			}
+			if upstreamProtocol != request.Protocol && !supportsModelConversion(runtime, request.Protocol, upstreamProtocol, request.Streaming) {
+				narrow(contract.RoutingSkipConversionUnavailable)
+				continue
+			}
+			planType = contract.PlanTypeAdapter
 		}
 		legacy, _ := candidate.EndpointView()
 		return Resolved{
@@ -546,6 +558,9 @@ func baseURLForService(service contract.Service, subscriptionBaseURL string) str
 	}
 	if service.Kind == contract.ServiceKindCopilotSubscription {
 		return accountauth.DefaultCopilotAPIBaseURL
+	}
+	if service.Kind == contract.ServiceKindKiroSubscription {
+		return accountauth.DefaultKiroAPIBaseURL
 	}
 	if service.Kind == contract.ServiceKindDroidSubscription {
 		return accountauth.DefaultDroidAPIBaseURL

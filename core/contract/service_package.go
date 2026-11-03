@@ -56,6 +56,7 @@ var packageProviderNames = map[SubscriptionProvider]string{
 	SubscriptionProviderAntigravity:   "antigravity",
 	SubscriptionProviderGitHubCopilot: "copilot",
 	SubscriptionProviderFactoryDroid:  "droid",
+	SubscriptionProviderKiro:          "kiro",
 }
 
 // ServicePackage is a group of services routing treats as one: every

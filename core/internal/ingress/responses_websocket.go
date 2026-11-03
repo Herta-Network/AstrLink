@@ -208,7 +208,7 @@ func websocketSkip(candidate endpoint.Resolved, routingModel string) contract.Ro
 	if !service.ResponsesWebSocket() {
 		return contract.RoutingSkipWebSocketDisabled
 	}
-	if candidate.PlanType == contract.PlanTypeRelayKit {
+	if candidate.PlanType.UsesLocalConversion() {
 		return contract.RoutingSkipWebSocketUnsupported
 	}
 	if candidate.UpstreamProtocol != "" && candidate.UpstreamProtocol != contract.ProtocolOpenAIResponses {

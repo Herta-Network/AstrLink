@@ -38,6 +38,7 @@ type ClientIdentities struct {
 	Codex  ClientIdentityStatus `json:"codex"`
 	Claude ClientIdentityStatus `json:"claude"`
 	Grok   ClientIdentityStatus `json:"grok"`
+	Kiro   ClientIdentityStatus `json:"kiro"`
 }
 
 // ClientIdentityStatus pairs the version learned from official client
