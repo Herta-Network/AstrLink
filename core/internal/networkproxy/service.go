@@ -16,6 +16,14 @@ import (
 )
 
 type snapshotKey struct{}
+
+type poolProxyReader interface {
+	AccountPoolMembership(context.Context, contract.ServiceID) (contract.AccountPool, contract.AccountPoolMember, bool, error)
+}
+
+var ErrPoolProxyUnavailable = errors.New("account pool proxy configuration is unavailable")
+var ErrProxyUnavailable = errors.New("outbound proxy is unavailable")
+
 type snapshot struct {
 	service contract.ServiceID
 	mode    string
@@ -32,12 +40,30 @@ func Bind(ctx context.Context, service contract.Service, secrets secretstore.Sec
 	if service.ID == "" {
 		return ctx, nil
 	}
+	if err := service.Proxy.Validate(service.ID); err != nil {
+		return ctx, err
+	}
+	config := service.Proxy
+	if config == nil || config.Mode == "inherit" {
+		if pools, ok := secrets.(poolProxyReader); ok {
+			pool, _, found, err := pools.AccountPoolMembership(ctx, service.ID)
+			if err != nil {
+				return ctx, ErrPoolProxyUnavailable
+			}
+			if found && pool.Proxy != nil {
+				if err := pool.Proxy.ValidateForPool(pool.ID); err != nil {
+					return ctx, ErrPoolProxyUnavailable
+				}
+				config = pool.Proxy
+			}
+		}
+	}
 	var credential *contract.ProxyCredential
-	if service.Proxy != nil && service.Proxy.CredentialRef != "" {
+	if config != nil && config.CredentialRef != "" {
 		if secrets == nil {
 			return ctx, errors.New("instance proxy credential unavailable")
 		}
-		value, err := secrets.Get(ctx, secretstore.Ref(service.Proxy.CredentialRef))
+		value, err := secrets.Get(ctx, secretstore.Ref(config.CredentialRef))
 		if err != nil {
 			return ctx, errors.New("instance proxy credential unavailable")
 		}
@@ -47,7 +73,14 @@ func Bind(ctx context.Context, service contract.Service, secrets secretstore.Sec
 			return ctx, errors.New("invalid instance proxy credential")
 		}
 	}
-	return BindConfig(ctx, service.ID, service.Proxy, credential)
+	// The owning service/pool reference was validated above. Once resolved,
+	// the per-operation transport needs the credential value, not its owner ID.
+	if config != nil {
+		resolved := *config
+		resolved.CredentialRef = ""
+		config = &resolved
+	}
+	return BindConfig(ctx, service.ID, config, credential)
 }
 
 // BindConfig also supports an unsaved model probe, without persisting its secrets.
@@ -177,7 +210,7 @@ func (t *scopedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 				if req.Body != nil {
 					req.Body.Close()
 				}
-				return nil, err
+				return nil, &connectionError{err}
 			}
 		}
 	}
@@ -208,8 +241,12 @@ func (t *scopedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	t.mu.Unlock()
 	response, err := entry.transport.RoundTrip(req)
-	if err != nil && s.mode == "custom" {
+	if err != nil && selected != nil {
 		return response, &connectionError{err}
+	}
+	if response != nil && selected != nil && response.StatusCode == http.StatusProxyAuthRequired {
+		response.Body.Close()
+		return nil, &connectionError{errors.New("proxy authentication failed")}
 	}
 	return response, err
 }
@@ -230,3 +267,5 @@ type connectionError struct{ cause error }
 
 func (e *connectionError) Error() string { return "instance proxy connection failed" }
 func (e *connectionError) Unwrap() error { return e.cause }
+
+func (e *connectionError) Is(target error) bool { return target == ErrProxyUnavailable }

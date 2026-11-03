@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"os"
 	"sync"
+
+	"github.com/QuantumNous/astrlink/core/contract"
 )
 
 // API sends the control API commands the frontend forwards to Core: each
@@ -443,13 +445,18 @@ func (s Services) ProbeServiceProxy(ctx context.Context, input json.RawMessage) 
 	if p, _ := asObject(proxy); p == nil || p["mode"] != "custom" {
 		return nil, errors.New("proxy test requires a custom proxy")
 	}
-	if id, ok := o["service_id"]; ok {
-		text, ok := asString(id)
-		if !ok {
-			return nil, errors.New("invalid service id")
-		}
-		if err := ValidateResourceID(text); err != nil {
-			return nil, err
+	if _, service := o["service_id"]; service && o["pool_id"] != nil {
+		return nil, errors.New("choose either a service or a pool")
+	}
+	for _, owner := range []string{"service_id", "pool_id"} {
+		if id, ok := o[owner]; ok {
+			text, ok := asString(id)
+			if !ok {
+				return nil, errors.New("invalid service id")
+			}
+			if err := ValidateResourceID(text); err != nil {
+				return nil, err
+			}
 		}
 	}
 	response, err := s.send(ctx, http.MethodPost, ServiceProxyProbesPath, input, "")
@@ -1052,21 +1059,20 @@ func (t Tokens) ListNetworkAddresses(ctx context.Context) (json.RawMessage, erro
 
 // CreateAccessToken creates a token, limited to some providers when
 // serviceScope is set.
-func (t Tokens) CreateAccessToken(ctx context.Context, name string, serviceScope *string, serviceIDs []string) (json.RawMessage, error) {
-	var body any
+func (t Tokens) CreateAccessToken(ctx context.Context, name string, routing contract.AccessTokenRouting, serviceScope *string, serviceIDs []string) (json.RawMessage, error) {
+	if err := routing.Validate(); err != nil {
+		return nil, err
+	}
+	body := map[string]any{"name": name, "routing_scope": routing.RoutingScope}
+	if routing.PoolID != "" {
+		body["pool_id"] = routing.PoolID
+	}
 	if serviceScope != nil {
 		if serviceIDs == nil {
 			serviceIDs = []string{}
 		}
-		body = struct {
-			Name         string   `json:"name"`
-			ServiceScope string   `json:"service_scope"`
-			ServiceIDs   []string `json:"service_ids"`
-		}{name, *serviceScope, serviceIDs}
-	} else {
-		body = struct {
-			Name string `json:"name"`
-		}{name}
+		body["service_scope"] = *serviceScope
+		body["service_ids"] = serviceIDs
 	}
 	return t.value(ctx, http.MethodPost, "/control/v1/access-tokens", body, "access token create")
 }

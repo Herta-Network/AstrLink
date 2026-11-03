@@ -1335,6 +1335,7 @@ END`,
 )`,
 			`INSERT INTO image_compression_totals (id, since) VALUES (1, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`,
 		}},
+		{Version: 60, Name: "account_pools", Statements: accountPoolStatements()},
 	}
 }
 

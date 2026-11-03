@@ -1,6 +1,7 @@
 package controlapi
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 // accessTokenCreateRequest omits service_scope for a token that may use
 // every provider, as clients that predate scopes do.
 type accessTokenCreateRequest struct {
+	accessTokenRoutingInput
 	Name         string                            `json:"name"`
 	ServiceScope *contract.AccessTokenServiceScope `json:"service_scope,omitempty"`
 	ServiceIDs   []contract.ServiceID              `json:"service_ids,omitempty"`
@@ -24,12 +26,34 @@ type accessTokenCreateRequest struct {
 
 // accessTokenUpdateRequest replaces the name and the provider scope together.
 type accessTokenUpdateRequest struct {
+	accessTokenRoutingInput
 	Name         string                           `json:"name"`
 	ServiceScope contract.AccessTokenServiceScope `json:"service_scope"`
 	ServiceIDs   []contract.ServiceID             `json:"service_ids"`
 }
 
+type accessTokenRoutingInput struct {
+	RoutingScope json.RawMessage `json:"routing_scope"`
+	PoolID       json.RawMessage `json:"pool_id,omitempty"`
+}
+
+func (input accessTokenRoutingInput) routing() (contract.AccessTokenRouting, error) {
+	var routing contract.AccessTokenRouting
+	if input.RoutingScope == nil || isJSONNull(input.RoutingScope) || json.Unmarshal(input.RoutingScope, &routing.RoutingScope) != nil {
+		return routing, fmt.Errorf("routing_scope must be explicitly global or pool")
+	}
+	if routing.RoutingScope == contract.RoutingScopeGlobal && input.PoolID != nil {
+		return routing, fmt.Errorf("global routing must not specify pool_id")
+	}
+	if input.PoolID != nil && (isJSONNull(input.PoolID) || json.Unmarshal(input.PoolID, &routing.PoolID) != nil) {
+		return routing, fmt.Errorf("pool_id must be a valid pool identifier")
+	}
+	return routing, routing.Validate()
+}
+
 type accessTokenResponse struct {
+	contract.AccessTokenRouting
+	ETag         string                           `json:"etag"`
 	ID           contract.AccessTokenID           `json:"id"`
 	Name         string                           `json:"name"`
 	Hint         string                           `json:"hint"`
@@ -112,13 +136,21 @@ func (handler *Handler) accessTokenItem(writer http.ResponseWriter, request *htt
 		return
 	}
 	switch request.Method {
-	case http.MethodDelete:
-		handler.deleteAccessToken(writer, request, id)
+	case http.MethodGet:
+		token, err := handler.accessTokens.Get(request.Context(), id)
+		if err != nil {
+			handler.writeAccessTokenError(writer, err)
+			return
+		}
+		writer.Header().Set("ETag", token.ETag())
+		writeJSON(writer, http.StatusOK, accessTokenMetadata(token))
 	case http.MethodPatch:
 		handler.updateAccessToken(writer, request, id)
+	case http.MethodDelete:
+		handler.deleteAccessToken(writer, request, id)
 	default:
-		writer.Header().Set("Allow", http.MethodPatch+", "+http.MethodDelete)
-		writeError(writer, http.StatusMethodNotAllowed, "method_not_allowed", "only PATCH and DELETE are allowed")
+		writer.Header().Set("Allow", "GET, PATCH, DELETE")
+		writeError(writer, http.StatusMethodNotAllowed, "method_not_allowed", "only GET, PATCH and DELETE are allowed")
 	}
 }
 
@@ -168,12 +200,18 @@ func (handler *Handler) createAccessToken(writer http.ResponseWriter, request *h
 		writeError(writer, http.StatusUnprocessableEntity, "invalid_access_token_services", "service_ids needs service_scope selected")
 		return
 	}
-	created, err := handler.accessTokens.Create(request.Context(), input.Name, services...)
+	routing, err := input.routing()
+	if err != nil {
+		writeError(writer, http.StatusUnprocessableEntity, "invalid_token_scope", err.Error())
+		return
+	}
+	created, err := handler.accessTokens.Create(request.Context(), input.Name, routing, services...)
 	if err != nil {
 		handler.writeAccessTokenError(writer, err)
 		return
 	}
 	writer.Header().Set("Location", AccessTokensPath+"/"+string(created.Token.ID))
+	writer.Header().Set("ETag", created.Token.ETag())
 	writeJSON(writer, http.StatusCreated, accessTokenSecretResponse{
 		Token:       accessTokenMetadata(created.Token),
 		AccessToken: created.Value,
@@ -185,12 +223,36 @@ func (handler *Handler) updateAccessToken(
 	request *http.Request,
 	id contract.AccessTokenID,
 ) {
-	// The merge patch names all three fields, so it replaces them.
+	// A routing patch uses If-Match. Name and allowed-provider edits preserve the pool binding.
 	if !requireMediaType(writer, request) {
 		return
 	}
 	var input accessTokenUpdateRequest
 	if !decodeControlJSON(writer, request, &input) {
+		return
+	}
+	if input.RoutingScope != nil || input.PoolID != nil {
+		if input.Name != "" || input.ServiceScope != "" || input.ServiceIDs != nil {
+			writeError(writer, http.StatusUnprocessableEntity, "invalid_token_scope", "update token routing separately from its name and provider scope")
+			return
+		}
+		routing, err := input.routing()
+		if err != nil {
+			writeError(writer, http.StatusUnprocessableEntity, "invalid_token_scope", err.Error())
+			return
+		}
+		expected := request.Header.Get("If-Match")
+		if expected == "" {
+			writeError(writer, http.StatusPreconditionRequired, "precondition_required", "If-Match is required")
+			return
+		}
+		token, err := handler.accessTokens.UpdateRouting(request.Context(), id, routing, expected)
+		if err != nil {
+			handler.writeAccessTokenError(writer, err)
+			return
+		}
+		writer.Header().Set("ETag", token.ETag())
+		writeJSON(writer, http.StatusOK, accessTokenMetadata(token))
 		return
 	}
 	services := contract.AccessTokenServices{Scope: input.ServiceScope, ServiceIDs: input.ServiceIDs}
@@ -266,6 +328,7 @@ func accessTokenMetadata(token accesstoken.Token) accessTokenResponse {
 		ids = []contract.ServiceID{}
 	}
 	return accessTokenResponse{
+		AccessTokenRouting: token.AccessTokenRouting, ETag: token.ETag(),
 		ID: token.ID, Name: token.Name, Hint: token.Hint, Source: token.Source,
 		CreatedAt: token.CreatedAt, ServiceScope: scope, ServiceIDs: ids,
 	}
@@ -275,6 +338,8 @@ func (handler *Handler) writeAccessTokenError(writer http.ResponseWriter, err er
 	switch {
 	case errors.Is(err, storage.ErrNotFound):
 		writeError(writer, http.StatusNotFound, "not_found", "access token not found")
+	case errors.Is(err, storage.ErrPrecondition):
+		writeError(writer, http.StatusPreconditionFailed, "precondition_failed", "access token changed")
 	case errors.Is(err, storage.ErrConflict):
 		writeError(writer, http.StatusConflict, "conflict", "access token name conflicts with current state")
 	case errors.Is(err, accesstoken.ErrTokenLimit):
@@ -282,7 +347,7 @@ func (handler *Handler) writeAccessTokenError(writer http.ResponseWriter, err er
 	case errors.Is(err, accesstoken.ErrInvalidServices):
 		writeError(writer, http.StatusUnprocessableEntity, "invalid_access_token_services", "access token providers violate the contract")
 	case errors.Is(err, accesstoken.ErrInvalidName), errors.Is(err, storage.ErrInvalidArgument):
-		writeError(writer, http.StatusUnprocessableEntity, "invalid_access_token", "access token name violates the contract")
+		writeError(writer, http.StatusUnprocessableEntity, "invalid_access_token", "access token name or routing scope violates the contract")
 	case errors.Is(err, secretstore.ErrUnavailable):
 		// The token still authenticates; only its saved copy is unreadable.
 		writeError(writer, http.StatusConflict, "access_token_unreadable", "the saved access token does not decrypt on this device; create a new token to see its value")

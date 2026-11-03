@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/astrlink/core/contract"
 	"github.com/QuantumNous/astrlink/core/internal/secretstore"
 	"github.com/QuantumNous/astrlink/core/internal/servicemodel"
+	"github.com/QuantumNous/astrlink/core/internal/storage"
 )
 
 func TestServiceProxyCRUDCredentialsAndDraftProbe(t *testing.T) {
@@ -147,5 +148,56 @@ func TestServiceProxyProbeRejectsInvalidAndFailedConnections(t *testing.T) {
 		if response.Code != test.status || strings.Contains(response.Body.String(), "draft-secret") {
 			t.Fatalf("unexpected proxy failure: %d %s", response.Code, response.Body.String())
 		}
+	}
+}
+
+func TestPoolProxyProbeUsesPoolSecretWithoutSavingDraft(t *testing.T) {
+	store, handler := newServiceHandler(t, "service_unused")
+	received := make(chan string, 3)
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodHead || r.URL.Host != "provider.invalid" || r.Header.Get("User-Agent") != "" || r.Header.Get("Authorization") != "" {
+			t.Errorf("unexpected probe request %s %s", r.Method, r.URL)
+		}
+		received <- r.Header.Get("Proxy-Authorization")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer proxy.Close()
+	pool := contract.AccountPool{ID: "pool_proxy_test", Name: "Pool", Provider: contract.SubscriptionProviderClaudeCode, Enabled: true,
+		Sticky: contract.ChannelStickiness{Enabled: true, TTLSeconds: 3600}, Queue: contract.AccountPoolQueue{MaxWaitingRequests: 32, TimeoutMS: 5000},
+		Proxy: &contract.ServiceProxy{Mode: "custom", URL: proxy.URL}}
+	created, err := store.CreateAccountPool(context.Background(), pool, storage.PoolProxyMutation{Present: true, Credential: &contract.ProxyCredential{Username: "saved", Password: "value"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct{ credential, auth string }{
+		{"", "Basic c2F2ZWQ6dmFsdWU="},
+		{`,"credential":null`, ""},
+		{`,"credential":{"username":"draft","password":"value"}`, "Basic ZHJhZnQ6dmFsdWU="},
+	} {
+		body := `{"pool_id":"pool_proxy_test","target_url":"http://provider.invalid","proxy":{"mode":"custom","url":"` + proxy.URL + `"` + test.credential + `}}`
+		response := serviceRequestForTest(t, handler, http.MethodPost, ServiceProxyProbesPath, "application/json", body, "")
+		if response.Code != http.StatusOK {
+			t.Fatal(response.Body.String())
+		}
+		select {
+		case auth := <-received:
+			if auth != test.auth {
+				t.Errorf("proxy auth %q, want %q", auth, test.auth)
+			}
+		default:
+			t.Fatal("probe never reached proxy")
+		}
+	}
+	persisted, err := store.GetAccountPool(context.Background(), pool.ID)
+	if err != nil || persisted.ETag != created.ETag {
+		t.Fatalf("probe persisted draft: %+v %v", persisted, err)
+	}
+	secret, err := store.Get(context.Background(), secretstore.Ref(persisted.Pool.Proxy.CredentialRef))
+	if err != nil || !strings.Contains(string(secret), "saved") {
+		t.Fatal("saved credential replaced")
+	}
+	ambiguous := serviceRequestForTest(t, handler, http.MethodPost, ServiceProxyProbesPath, "application/json", `{"pool_id":"pool_proxy_test","service_id":"service_unused","target_url":"http://provider.invalid","proxy":{"mode":"custom","url":"`+proxy.URL+`"}}`, "")
+	if ambiguous.Code != http.StatusUnprocessableEntity {
+		t.Fatal(ambiguous.Body.String())
 	}
 }

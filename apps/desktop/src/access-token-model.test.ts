@@ -8,6 +8,8 @@ import {
 } from "./access-token-model";
 
 const token = {
+  routing_scope: "global" as const,
+  etag: '"token-routing-v1"',
   id: "token_01",
   name: "VS Code",
   hint: "astr_…K8Q2",

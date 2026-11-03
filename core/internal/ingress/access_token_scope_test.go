@@ -54,12 +54,12 @@ func TestAccessTokenScopeLimitsRouting(t *testing.T) {
 	var hosts []string
 	handler := NewWithDependencies(Dependencies{
 		Resolver: resolver, Authorizer: endpoint.NewSecretAuthorizer(store), RequestRecords: store, AuditBlobs: store,
-		AccessTokenAuthenticator: ScopedAccessTokenAuthenticatorFunc(func(_ context.Context, raw string) (contract.AccessTokenID, contract.AccessTokenServices, error) {
+		AccessTokenAuthenticator: AccessTokenAuthenticatorFunc(func(_ context.Context, raw string) (AuthenticatedAccessToken, error) {
 			scope, ok := scopes[raw]
 			if !ok {
-				return "", contract.AccessTokenServices{}, errInvalidTestToken
+				return AuthenticatedAccessToken{}, errInvalidTestToken
 			}
-			return contract.AccessTokenID("access_token_" + strings.TrimPrefix(raw, "astr_")), scope, nil
+			return AuthenticatedAccessToken{ID: contract.AccessTokenID("access_token_" + strings.TrimPrefix(raw, "astr_")), AccessTokenRouting: contract.AccessTokenRouting{RoutingScope: contract.RoutingScopeGlobal}, RoutingRevision: 1, Services: scope}, nil
 		}),
 		Forwarder: transport.New(roundTripFunc(func(r *http.Request) (*http.Response, error) {
 			hosts = append(hosts, r.URL.Host)

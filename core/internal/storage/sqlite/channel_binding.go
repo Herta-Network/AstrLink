@@ -25,16 +25,16 @@ func (store *Store) lockChannelBindings(ctx context.Context) error {
 }
 
 func bindingScopeArgs(scope contract.ChannelBindingScope) []any {
-	return []any{scope.SessionID, scope.Principal, scope.Protocol, scope.Model}
+	return []any{scope.SessionID, scope.Principal, scope.PoolID, scope.Protocol, scope.Model}
 }
 
-const bindingColumns = `session_id, principal, protocol, model, service_id, source, request_id, updated_at, expires_at`
-const bindingWhere = `session_id = ? AND principal = ? AND protocol = ? AND model = ?`
+const bindingColumns = `session_id, principal, pool_id, protocol, model, service_id, source, request_id, updated_at, expires_at`
+const bindingWhere = `session_id = ? AND principal = ? AND pool_id = ? AND protocol = ? AND model = ?`
 
 func scanChannelBinding(row interface{ Scan(...any) error }) (contract.ChannelBinding, error) {
 	var b contract.ChannelBinding
 	var updated, expires string
-	err := row.Scan(&b.SessionID, &b.Principal, &b.Protocol, &b.Model, &b.ServiceID, &b.Source, &b.RequestID, &updated, &expires)
+	err := row.Scan(&b.SessionID, &b.Principal, &b.PoolID, &b.Protocol, &b.Model, &b.ServiceID, &b.Source, &b.RequestID, &updated, &expires)
 	if err != nil {
 		return b, err
 	}
@@ -116,8 +116,8 @@ func (store *Store) RememberChannelBinding(ctx context.Context, binding contract
 		return nil
 	}
 	args := append(bindingScopeArgs(binding.ChannelBindingScope), binding.ServiceID, binding.Source, binding.RequestID, bindingTime(binding.UpdatedAt), bindingTime(binding.ExpiresAt), bindingTime(started))
-	_, err = tx.ExecContext(ctx, `INSERT INTO channel_bindings (`+bindingColumns+`, request_started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT(session_id, principal, protocol, model) DO UPDATE SET service_id=excluded.service_id, source=excluded.source, request_id=excluded.request_id, updated_at=excluded.updated_at, expires_at=excluded.expires_at, request_started_at=excluded.request_started_at`, args...)
+	_, err = tx.ExecContext(ctx, `INSERT INTO channel_bindings (`+bindingColumns+`, request_started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(session_id, principal, pool_id, protocol, model) DO UPDATE SET service_id=excluded.service_id, source=excluded.source, request_id=excluded.request_id, updated_at=excluded.updated_at, expires_at=excluded.expires_at, request_started_at=excluded.request_started_at`, args...)
 	if err != nil {
 		return err
 	}

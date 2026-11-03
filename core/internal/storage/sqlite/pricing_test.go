@@ -438,7 +438,7 @@ func TestBillingSummaryTokenAmountsSortNumericallyAndUseCurrentTokens(t *testing
 	}
 	ids := make([]string, 4)
 	for i := range ids {
-		token, err := manager.Create(ctx, fmt.Sprintf("Sort token %d", i))
+		token, err := manager.Create(ctx, fmt.Sprintf("Sort token %d", i), contract.AccessTokenRouting{RoutingScope: contract.RoutingScopeGlobal})
 		if err != nil {
 			t.Fatal(err)
 		}

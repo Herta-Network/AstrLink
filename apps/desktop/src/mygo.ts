@@ -4,6 +4,13 @@ import { call, event } from "mygo-runtime";
 
 // ---- Types ----
 
+export interface AccessTokenRouting {
+  routing_scope: RoutingScope;
+  pool_id?: AccountPoolID;
+}
+
+export type AccountPoolID = string;
+
 /** Action is what an item does to its place. */
 export type Action = "write" | "remove";
 
@@ -835,6 +842,8 @@ export interface Route {
   proxy?: string;
 }
 
+export type RoutingScope = "global" | "pool";
+
 /** ServiceOrder is the order services are tried in. */
 export interface ServiceOrder {
   service_ids: string[];
@@ -1285,13 +1294,22 @@ export const Services = {
   completeServiceAuthorization(serviceID: string, sessionID: string, code: string): Promise<unknown> {
     return call("Services.CompleteServiceAuthorization", serviceID, sessionID, code);
   },
+  createAccountPool(input: unknown): Promise<unknown> {
+    return call("Services.CreateAccountPool", input);
+  },
   /** CreateService adds a provider. */
   createService(input: unknown): Promise<ServiceRecord> {
     return call("Services.CreateService", input);
   },
+  deleteAccountPool(poolID: string, etag: string): Promise<void> {
+    return call("Services.DeleteAccountPool", poolID, etag);
+  },
   /** DeleteService removes a provider the page read at etag. */
   deleteService(serviceID: string, etag: string): Promise<void> {
     return call("Services.DeleteService", serviceID, etag);
+  },
+  getAccountPool(poolID: string): Promise<unknown> {
+    return call("Services.GetAccountPool", poolID);
   },
   /**
    * GetClaudeCLI reads the claude CLI official Claude accounts run. The
@@ -1332,6 +1350,9 @@ export const Services = {
   getServiceUsage(serviceID: string, fresh: boolean | null): Promise<unknown> {
     return call("Services.GetServiceUsage", serviceID, fresh);
   },
+  listAccountPools(): Promise<unknown> {
+    return call("Services.ListAccountPools");
+  },
   /**
    * ListServiceRiskEvents lists a subscription's recent upstream risk
    * events, newest first.
@@ -1350,6 +1371,9 @@ export const Services = {
   logoutService(serviceID: string): Promise<ServiceRecord> {
     return call("Services.LogoutService", serviceID);
   },
+  probeAccountPoolQuota(poolID: string, serviceID: string): Promise<void> {
+    return call("Services.ProbeAccountPoolQuota", poolID, serviceID);
+  },
   /** ProbeDraftServiceModels lists the models of a provider not yet saved. */
   probeDraftServiceModels(input: unknown): Promise<unknown> {
     return call("Services.ProbeDraftServiceModels", input);
@@ -1362,6 +1386,9 @@ export const Services = {
   probeServiceProxy(input: unknown): Promise<unknown> {
     return call("Services.ProbeServiceProxy", input);
   },
+  replaceAccountPoolMembers(poolID: string, etag: string, members: unknown): Promise<unknown> {
+    return call("Services.ReplaceAccountPoolMembers", poolID, etag, members);
+  },
   /** ResetServiceUsage resets a provider's local usage. */
   resetServiceUsage(serviceID: string): Promise<unknown> {
     return call("Services.ResetServiceUsage", serviceID);
@@ -1373,6 +1400,9 @@ export const Services = {
    */
   testService(serviceID: string, input: unknown, testID: string | null): Promise<unknown> {
     return call("Services.TestService", serviceID, input, testID);
+  },
+  updateAccountPool(poolID: string, etag: string, patch: unknown): Promise<unknown> {
+    return call("Services.UpdateAccountPool", poolID, etag, patch);
   },
   /** UpdateService patches a provider the page read at etag. */
   updateService(serviceID: string, etag: string, patch: unknown): Promise<ServiceRecord> {
@@ -1545,8 +1575,8 @@ export const Tokens = {
    * CreateAccessToken creates a token, limited to some providers when
    * serviceScope is set.
    */
-  createAccessToken(name: string, serviceScope: string | null, serviceIDs: string[]): Promise<unknown> {
-    return call("Tokens.CreateAccessToken", name, serviceScope, serviceIDs);
+  createAccessToken(name: string, routing: AccessTokenRouting, serviceScope: string | null, serviceIDs: string[]): Promise<unknown> {
+    return call("Tokens.CreateAccessToken", name, routing, serviceScope, serviceIDs);
   },
   /** DeleteAccessToken deletes a token. */
   deleteAccessToken(tokenID: string): Promise<void> {
@@ -1567,6 +1597,9 @@ export const Tokens = {
   /** UpdateAccessToken renames a token and replaces the providers it may use. */
   updateAccessToken(tokenID: string, name: string, serviceScope: string, serviceIDs: string[]): Promise<unknown> {
     return call("Tokens.UpdateAccessToken", tokenID, name, serviceScope, serviceIDs);
+  },
+  updateAccessTokenRouting(tokenID: string, etag: string, routing: unknown): Promise<unknown> {
+    return call("Tokens.UpdateAccessTokenRouting", tokenID, etag, routing);
   },
 } as const;
 

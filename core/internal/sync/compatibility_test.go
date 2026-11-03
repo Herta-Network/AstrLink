@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -80,12 +81,12 @@ func TestSyncUpgradesPackageOnlyWhenTokensParticipate(t *testing.T) {
 	created := createAccessToken(t, pair.first.store, "version gate")
 	pair.sync(pair.first)
 	document, _, _ := remotePackage(t, pair.first)
-	if document.Version != 2 {
+	if document.Version != PackageVersion {
 		t.Fatalf("token package can still be overwritten by a v1 writer: version=%d", document.Version)
 	}
 	pair.sync(pair.second)
 	document, _, _ = remotePackage(t, pair.second)
-	if _, ok := document.Get(KindAccessToken, string(created.Token.ID)); !ok || document.Version != 2 {
+	if _, ok := document.Get(KindAccessToken, string(created.Token.ID)); !ok || document.Version != PackageVersion {
 		t.Fatal("a narrow scope dropped the tokens or their version protection")
 	}
 	tokens, err := pair.first.store.ListAccessTokens(ctx)
@@ -99,7 +100,7 @@ func TestSyncUpgradesPackageOnlyWhenTokensParticipate(t *testing.T) {
 	}
 	pair.sync(pair.first)
 	document, _, _ = remotePackage(t, pair.first)
-	if document.Version != 2 || len(document.Entities[KindAccessToken]) != 0 {
+	if document.Version != PackageVersion || len(document.Entities[KindAccessToken]) != 0 {
 		t.Fatal("deleting the last token downgraded the package or retained the token")
 	}
 	config.Scope.Tokens = false
@@ -108,7 +109,7 @@ func TestSyncUpgradesPackageOnlyWhenTokensParticipate(t *testing.T) {
 		t.Fatal(err)
 	}
 	pair.sync(pair.first)
-	if document, _, _ := remotePackage(t, pair.first); document.Version != 2 {
+	if document, _, _ := remotePackage(t, pair.first); document.Version != PackageVersion {
 		t.Fatal("disabling token sync downgraded an existing v2 remote")
 	}
 }
@@ -122,6 +123,7 @@ func TestNarrowScopeUpgradesTokensAlreadyInV1Package(t *testing.T) {
 	pair.sync(pair.first)
 	document, payload, etag := remotePackage(t, pair.first)
 	document.Version = 1
+	legacyTokenDocuments(t, &document)
 	encoded, err := document.Encode()
 	if err != nil {
 		t.Fatal(err)
@@ -164,7 +166,7 @@ func TestNarrowScopeUpgradesTokensAlreadyInV1Package(t *testing.T) {
 	}
 	pair.sync(pair.second)
 	document, _, _ = remotePackage(t, pair.second)
-	if _, ok := document.Get(KindAccessToken, string(created.Token.ID)); !ok || document.Version != 2 {
+	if _, ok := document.Get(KindAccessToken, string(created.Token.ID)); !ok || document.Version != PackageVersion {
 		t.Fatal("v1 token data was dropped or left writable by legacy clients")
 	}
 }
@@ -208,6 +210,7 @@ func TestForcePushRetryPreservesNewRemoteTokensAndVersion(t *testing.T) {
 		clear(entity.Secret)
 	}
 	document.Version = 2
+	legacyTokenDocuments(t, &document)
 	encoded, err := document.Encode()
 	if err != nil {
 		t.Fatal(err)
@@ -257,7 +260,7 @@ func TestForcePushRetryPreservesNewRemoteTokensAndVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	document, _, _ = remotePackage(t, pair.first)
-	if _, ok := document.Get(KindAccessToken, string(created.Token.ID)); !ok || document.Version != 2 {
+	if _, ok := document.Get(KindAccessToken, string(created.Token.ID)); !ok || document.Version != PackageVersion {
 		t.Fatal("conditional-write retry lost the new token or downgraded its package")
 	}
 }
@@ -378,5 +381,28 @@ func TestUnreadableAccessTokenAbortsSyncWithoutRevokingOtherDevices(t *testing.T
 				authenticateAccessToken(t, pair.second.store, created.Value)
 			})
 		}
+	}
+}
+
+// Historical v1/v2 payloads had no routing fields. Build that actual wire
+// shape rather than labelling a v3 scoped document as an older version.
+func legacyTokenDocuments(t *testing.T, document *Document) {
+	t.Helper()
+	for id, entity := range document.Entities[KindAccessToken] {
+		if entity.Deleted {
+			continue
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(entity.Document, &fields); err != nil {
+			t.Fatal(err)
+		}
+		delete(fields, "routing_scope")
+		delete(fields, "pool_id")
+		raw, err := json.Marshal(fields)
+		if err != nil {
+			t.Fatal(err)
+		}
+		entity.Document = raw
+		document.Entities[KindAccessToken][id] = entity
 	}
 }

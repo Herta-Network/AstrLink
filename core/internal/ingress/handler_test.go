@@ -186,11 +186,11 @@ func TestProductionInferenceGateRequiresCanonicalHostAndLocalToken(t *testing.T)
 		Authorizer: authorizerFunc(func(context.Context, contract.Endpoint) (http.Header, error) {
 			return nil, errors.New("authorizer must not run without an endpoint")
 		}),
-		AccessTokenAuthenticator: AccessTokenAuthenticatorFunc(func(_ context.Context, presented string) (contract.AccessTokenID, error) {
+		AccessTokenAuthenticator: AccessTokenAuthenticatorFunc(func(_ context.Context, presented string) (AuthenticatedAccessToken, error) {
 			if presented == token {
-				return "token_primary", nil
+				return testAccessTokenPrincipal("token_primary"), nil
 			}
-			return "", errors.New("not found")
+			return AuthenticatedAccessToken{}, errors.New("not found")
 		}),
 		AllowedHost: "127.0.0.1:8317",
 	})
@@ -270,9 +270,9 @@ func TestReachabilityProbeSkipsTokenAndRecordsButKeepsLocalGate(t *testing.T) {
 		Authorizer: authorizerFunc(func(context.Context, contract.Endpoint) (http.Header, error) {
 			return nil, errors.New("authorizer must not run")
 		}),
-		AccessTokenAuthenticator: AccessTokenAuthenticatorFunc(func(context.Context, string) (contract.AccessTokenID, error) {
+		AccessTokenAuthenticator: AccessTokenAuthenticatorFunc(func(context.Context, string) (AuthenticatedAccessToken, error) {
 			t.Fatal("reachability probe must not authenticate")
-			return "", errors.New("unreachable")
+			return AuthenticatedAccessToken{}, errors.New("unreachable")
 		}),
 		RequestRecords: store,
 		AllowedHost:    "127.0.0.1:8317",
@@ -391,8 +391,8 @@ func TestNewProductionRejectsMissingSecurityDependencies(t *testing.T) {
 			return endpoint.Resolved{}, endpoint.ErrNoEndpoint
 		}),
 		Authorizer: authorizerFunc(func(context.Context, contract.Endpoint) (http.Header, error) { return nil, nil }),
-		AccessTokenAuthenticator: AccessTokenAuthenticatorFunc(func(context.Context, string) (contract.AccessTokenID, error) {
-			return "token_primary", nil
+		AccessTokenAuthenticator: AccessTokenAuthenticatorFunc(func(context.Context, string) (AuthenticatedAccessToken, error) {
+			return testAccessTokenPrincipal("token_primary"), nil
 		}),
 		AllowedHost: "127.0.0.1:8317",
 	}
@@ -430,12 +430,12 @@ func TestProductionInferenceGateAuthenticatesMultipleTokensAndAttachesStablePrin
 		Authorizer: authorizerFunc(func(context.Context, contract.Endpoint) (http.Header, error) {
 			return nil, errors.New("unexpected authorizer call")
 		}),
-		AccessTokenAuthenticator: AccessTokenAuthenticatorFunc(func(_ context.Context, token string) (contract.AccessTokenID, error) {
+		AccessTokenAuthenticator: AccessTokenAuthenticatorFunc(func(_ context.Context, token string) (AuthenticatedAccessToken, error) {
 			id, ok := active[token]
 			if !ok {
-				return "", errors.New("invalid token")
+				return AuthenticatedAccessToken{}, errors.New("invalid token")
 			}
-			return id, nil
+			return testAccessTokenPrincipal(id), nil
 		}),
 		AllowedHost: "127.0.0.1:8317",
 	})
@@ -484,12 +484,12 @@ func TestProductionInferenceGateDoesNotReauthenticateInFlightRequestAfterDeletio
 		Authorizer: authorizerFunc(func(context.Context, contract.Endpoint) (http.Header, error) {
 			return nil, errors.New("unexpected authorizer call")
 		}),
-		AccessTokenAuthenticator: AccessTokenAuthenticatorFunc(func(_ context.Context, token string) (contract.AccessTokenID, error) {
+		AccessTokenAuthenticator: AccessTokenAuthenticatorFunc(func(_ context.Context, token string) (AuthenticatedAccessToken, error) {
 			id, ok := active[token]
 			if !ok {
-				return "", errors.New("invalid token")
+				return AuthenticatedAccessToken{}, errors.New("invalid token")
 			}
-			return id, nil
+			return testAccessTokenPrincipal(id), nil
 		}),
 		AllowedHost: "127.0.0.1:8317",
 	})
@@ -2111,8 +2111,8 @@ func TestInferencePlaneRecordsCompletedHTTPErrorAsFailed(t *testing.T) {
 }
 
 func TestInferencePlaneRecordsBoundaryAndClassifyErrors(t *testing.T) {
-	rejectToken := AccessTokenAuthenticatorFunc(func(context.Context, string) (contract.AccessTokenID, error) {
-		return "", errors.New("not found")
+	rejectToken := AccessTokenAuthenticatorFunc(func(context.Context, string) (AuthenticatedAccessToken, error) {
+		return AuthenticatedAccessToken{}, errors.New("not found")
 	})
 
 	t.Run("invalid_access_token", func(t *testing.T) {
@@ -2465,4 +2465,8 @@ func assertInferenceError(t *testing.T, response *httptest.ResponseRecorder, sta
 		t.Fatalf("error response = %#v", envelope)
 	}
 	return envelope
+}
+
+func testAccessTokenPrincipal(id contract.AccessTokenID) AuthenticatedAccessToken {
+	return AuthenticatedAccessToken{ID: id, AccessTokenRouting: contract.AccessTokenRouting{RoutingScope: contract.RoutingScopeGlobal}, RoutingRevision: 1}
 }

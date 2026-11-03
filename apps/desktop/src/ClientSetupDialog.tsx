@@ -1,3 +1,4 @@
+import { getAccountPool } from "./bridge";
 import { isWebEdition } from "./edition";
 import { WebClientSetup } from "./WebClientSetup";
 import {
@@ -501,7 +502,16 @@ function DesktopClientSetupDialog({
   const [statusRead, setStatusRead] = useState(0);
   // Switching providers in CC Switch overwrites what AstrLink writes.
   const [ccSwitch, setCCSwitch] = useState(false);
-  const [fullCatalog, setCatalog] = useState<ModelCatalog>({
+  const poolKey =
+    currentToken.routing_scope === "pool" ? (currentToken.pool_id ?? "") : null;
+  const [fullCatalog, setCatalog] = useState<
+    ModelCatalog & {
+      poolKey: string | null;
+      status: "loading" | "ready" | "error";
+    }
+  >({
+    poolKey,
+    status: "loading",
     services: [],
     redirects: [],
   });
@@ -511,6 +521,7 @@ function DesktopClientSetupDialog({
       ? currentToken.service_ids.join("\n")
       : null;
   const catalog = useMemo<ModelCatalog>(() => {
+    if (fullCatalog.poolKey !== poolKey) return { services: [], redirects: [] };
     if (scopeKey === null) return fullCatalog;
     const allowed = new Set(scopeKey.split("\n"));
     return {
@@ -519,10 +530,9 @@ function DesktopClientSetupDialog({
         allowed.has(service.id),
       ),
     };
-  }, [fullCatalog, scopeKey]);
-  const [catalogStatus, setCatalogStatus] = useState<
-    "loading" | "ready" | "error"
-  >("loading");
+  }, [fullCatalog, scopeKey, poolKey]);
+  const catalogStatus =
+    fullCatalog.poolKey === poolKey ? fullCatalog.status : "loading";
   // The user's checks by place; unchecked places fall back to the defaults.
   const [checks, setChecks] = useState<Record<string, boolean>>({});
   const [selection, setSelection] = useState<string | null>(null);
@@ -629,27 +639,47 @@ function DesktopClientSetupDialog({
       );
   }, [refresh]);
 
+  const loadScopedServices = useCallback(async () => {
+    const page = await listServices();
+    if (currentToken.routing_scope === "global") return page;
+    if (!currentToken.pool_id)
+      throw new Error("Account pool binding is unavailable");
+    const pool = await getAccountPool(currentToken.pool_id);
+    const members = new Set(
+      pool.enabled
+        ? pool.members
+            .filter((member) => member.enabled)
+            .map((member) => member.service_id)
+        : [],
+    );
+    return {
+      ...page,
+      items: page.items.filter((service) => members.has(service.id)),
+    };
+  }, [currentToken.routing_scope, currentToken.pool_id]);
+
   useEffect(() => {
     let cancelled = false;
     void Promise.allSettled([
-      Promise.resolve().then(() => listServices()),
+      loadScopedServices(),
       // Redirect sources are optional suggestions; any failure only drops them.
       Promise.resolve().then(() => getRoutingSettings()),
     ]).then(([services, routing]) => {
       if (cancelled) return;
       setCatalog({
+        poolKey,
+        status: services.status === "fulfilled" ? "ready" : "error",
         services: services.status === "fulfilled" ? services.value.items : [],
         redirects:
           routing.status === "fulfilled"
             ? (routing.value.model_redirects ?? [])
             : [],
       });
-      setCatalogStatus(services.status === "fulfilled" ? "ready" : "error");
     });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadScopedServices, poolKey]);
 
   const entries = useMemo(() => clientCatalog?.clients ?? [], [clientCatalog]);
   const entryById = useMemo(
@@ -1209,9 +1239,13 @@ function DesktopClientSetupDialog({
     if (needed.size > 0) {
       // The fresh patched records above also keep the marks right if this fails.
       try {
-        const next = await listServices();
+        const next = await loadScopedServices();
         if (active.current)
-          setCatalog((current) => ({ ...current, services: next.items }));
+          setCatalog((current) =>
+            current.poolKey === poolKey
+              ? { ...current, services: next.items }
+              : current,
+          );
       } catch {
         /* Keep the freshly read records. */
       }

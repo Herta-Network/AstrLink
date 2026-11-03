@@ -75,8 +75,10 @@ func (manager *Manager) EnsureDefault(ctx context.Context) (Token, bool, error) 
 	return token, created, nil
 }
 
-// Create issues a token. With no services it may use every provider.
-func (manager *Manager) Create(ctx context.Context, name string, services ...contract.AccessTokenServices) (CreatedToken, error) {
+func (manager *Manager) Create(ctx context.Context, name string, routing contract.AccessTokenRouting, services ...contract.AccessTokenServices) (CreatedToken, error) {
+	if err := routing.Validate(); err != nil {
+		return CreatedToken{}, fmt.Errorf("%w: %v", storage.ErrInvalidArgument, err)
+	}
 	candidate, err := manager.newToken(name)
 	if err != nil {
 		return CreatedToken{}, err
@@ -87,11 +89,31 @@ func (manager *Manager) Create(ctx context.Context, name string, services ...con
 		}
 		candidate.Services = services[0]
 	}
+	candidate.AccessTokenRouting = routing
 	token, err := manager.store.CreateAccessToken(ctx, candidate)
 	if err != nil {
 		return CreatedToken{}, fmt.Errorf("create access token: %w", err)
 	}
 	return CreatedToken{Token: token, Value: candidate.Value}, nil
+}
+
+func (manager *Manager) Get(ctx context.Context, id contract.AccessTokenID) (Token, error) {
+	store, ok := manager.store.(storage.AccessTokenRoutingStore)
+	if !ok {
+		return Token{}, fmt.Errorf("access token routing store unavailable")
+	}
+	return store.GetAccessToken(ctx, id)
+}
+
+func (manager *Manager) UpdateRouting(ctx context.Context, id contract.AccessTokenID, routing contract.AccessTokenRouting, expected string) (Token, error) {
+	if err := routing.Validate(); err != nil {
+		return Token{}, fmt.Errorf("%w: %v", storage.ErrInvalidArgument, err)
+	}
+	store, ok := manager.store.(storage.AccessTokenRoutingStore)
+	if !ok {
+		return Token{}, fmt.Errorf("access token routing store unavailable")
+	}
+	return store.UpdateAccessTokenRouting(ctx, id, routing, expected)
 }
 
 func (manager *Manager) List(ctx context.Context) ([]Token, error) {
@@ -148,16 +170,11 @@ func (manager *Manager) Delete(ctx context.Context, id contract.AccessTokenID) e
 // non-secret identifier. Missing or internally inconsistent records collapse
 // to the same public error and therefore fail closed.
 func (manager *Manager) Authenticate(ctx context.Context, raw string) (contract.AccessTokenID, error) {
-	token, err := manager.AuthenticateToken(ctx, raw)
-	if err != nil {
-		return "", err
-	}
-	return token.ID, nil
+	token, err := manager.AuthenticatePrincipal(ctx, raw)
+	return token.ID, err
 }
 
-// AuthenticateToken is Authenticate returning the token's metadata, including
-// the providers it may use.
-func (manager *Manager) AuthenticateToken(ctx context.Context, raw string) (Token, error) {
+func (manager *Manager) AuthenticatePrincipal(ctx context.Context, raw string) (Token, error) {
 	if !validRawToken(raw) {
 		return Token{}, ErrInvalidToken
 	}
@@ -172,6 +189,9 @@ func (manager *Manager) AuthenticateToken(ctx context.Context, raw string) (Toke
 	// The stored value stays sealed on this path; the hint still ties the
 	// metadata row to the presented token.
 	if token.Hint != tokenHint(raw) {
+		return Token{}, ErrInvalidToken
+	}
+	if token.AccessTokenRouting.Validate() != nil || token.RoutingRevision < 1 {
 		return Token{}, ErrInvalidToken
 	}
 	return token, nil
@@ -198,12 +218,13 @@ func (manager *Manager) newToken(name string) (storage.NewAccessToken, error) {
 	raw := tokenPrefix + base64.RawURLEncoding.EncodeToString(secretBytes)
 	hash := sha256.Sum256([]byte(raw))
 	return storage.NewAccessToken{
-		ID:      id,
-		Name:    canonicalName,
-		NameKey: nameKey,
-		Hash:    storage.AccessTokenHash(hash),
-		Hint:    tokenHint(raw),
-		Value:   raw,
+		AccessTokenRouting: contract.AccessTokenRouting{RoutingScope: contract.RoutingScopeGlobal},
+		ID:                 id,
+		Name:               canonicalName,
+		NameKey:            nameKey,
+		Hash:               storage.AccessTokenHash(hash),
+		Hint:               tokenHint(raw),
+		Value:              raw,
 	}, nil
 }
 

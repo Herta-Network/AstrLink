@@ -11,6 +11,7 @@ const bridgeMocks = vi.hoisted(() => ({
   getClientCatalog: vi.fn(),
   getClientConfigStatus: vi.fn(),
   getRoutingSettings: vi.fn(),
+  getAccountPool: vi.fn(),
   getService: vi.fn(),
   isCCSwitchInstalled: vi.fn(),
   listRequestRecords: vi.fn(),
@@ -29,6 +30,7 @@ const pricingMocks = vi.hoisted(() => ({
 
 vi.mock("./pricing-bridge", () => pricingMocks);
 
+import { testAccountPool } from "./account-pool-test-data";
 import type { AccessTokenSummary } from "./access-token-model";
 import {
   clientConfigClients,
@@ -46,6 +48,8 @@ import { onClientConfigsChanged } from "./use-client-configs";
 import type { Service } from "./service-model";
 
 const token: AccessTokenSummary = {
+  routing_scope: "global" as const,
+  etag: '"token-routing-v1"',
   id: "token_01",
   name: "工作机",
   hint: "astr_…K8Q2",
@@ -56,6 +60,8 @@ const token: AccessTokenSummary = {
 };
 
 const otherToken: AccessTokenSummary = {
+  routing_scope: "global" as const,
+  etag: '"token-routing-v1"',
   id: "token_02",
   name: "家里",
   hint: "astr_…7HT4",
@@ -448,12 +454,14 @@ describe("ClientSetupDialog", () => {
 
   const renderDialog = async ({
     inferenceURL = "http://127.0.0.1:8317",
+    selectedToken = token,
     conversionEngine,
     attentionFirst = false,
   }: {
     inferenceURL?: string;
     conversionEngine?: ConversionEngineCapability | null;
     attentionFirst?: boolean;
+    selectedToken?: AccessTokenSummary;
   } = {}) => {
     await act(async () => {
       reactRoot.render(
@@ -462,8 +470,8 @@ describe("ClientSetupDialog", () => {
           conversionEngine={conversionEngine}
           inferenceURL={inferenceURL}
           onClose={onClose}
-          token={token}
-          tokens={[token, otherToken]}
+          token={selectedToken}
+          tokens={[selectedToken, otherToken]}
         />,
       );
       await Promise.resolve();
@@ -1109,6 +1117,49 @@ describe("ClientSetupDialog", () => {
     expect(options).toContain("gpt-5.6");
   });
 
+  it.each([true, false])(
+    "filters pool models even when the pool is unavailable (available=%s)",
+    async (available) => {
+      const scoped = {
+        ...gateway,
+        id: "service_inside",
+        models: ["inside-model"],
+      };
+      bridgeMocks.listServices.mockResolvedValue({ items: [gateway, scoped] });
+      if (available)
+        bridgeMocks.getAccountPool.mockResolvedValue(
+          testAccountPool({
+            members: [
+              {
+                pool_id: "pool_test",
+                service_id: scoped.id,
+                enabled: true,
+                max_concurrent_requests: 1,
+              },
+            ],
+          }),
+        );
+      else
+        bridgeMocks.getAccountPool.mockRejectedValue(new Error("unavailable"));
+      await renderDialog({
+        selectedToken: {
+          ...token,
+          routing_scope: "pool",
+          pool_id: "pool_test",
+        },
+      });
+      await open("gemini");
+      const input = document.querySelector<HTMLInputElement>(
+        "#client-setup-model",
+      )!;
+      await act(async () => input.click());
+      const options = [...document.querySelectorAll('[role="option"]')].map(
+        (o) => o.getAttribute("aria-label"),
+      );
+      expect(options.includes("inside-model")).toBe(available);
+      expect(options).not.toContain("gpt-5.6");
+    },
+  );
   it("offers a limited token only its providers' models", async () => {
     const scoped: Service = {
       ...gateway,

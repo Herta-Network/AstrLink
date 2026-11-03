@@ -2,6 +2,7 @@ package ingress
 
 import (
 	"slices"
+	"time"
 
 	"github.com/QuantumNous/astrlink/core/contract"
 	"github.com/QuantumNous/astrlink/core/internal/endpoint"
@@ -11,6 +12,7 @@ import (
 // each attempt's record can explain why it used its provider. All attempts of
 // a request share it.
 type routingTrace struct {
+	pool *contract.PoolRoutingDecision
 	// ranking is every provider in priority order with the reason routing
 	// excluded it, if any.
 	ranking []endpoint.RankedService
@@ -27,7 +29,25 @@ func (session *recordSession) noteRoutingRanking(ranking []endpoint.RankedServic
 	if session == nil || ranking == nil {
 		return
 	}
-	session.routing = &routingTrace{ranking: slices.Clone(ranking)}
+	if session.routing == nil {
+		session.routing = &routingTrace{}
+	}
+	session.routing.ranking = slices.Clone(ranking)
+}
+
+func (session *recordSession) notePool(id contract.AccountPoolID, name string, scope contract.RoutingScope, wait time.Duration) {
+	if session == nil || id == "" {
+		return
+	}
+	if session.routing == nil {
+		session.routing = &routingTrace{ranking: []endpoint.RankedService{}}
+	}
+	if session.routing.pool == nil {
+		session.routing.pool = &contract.PoolRoutingDecision{}
+	}
+	pool := session.routing.pool
+	pool.ID, pool.Name, pool.RoutingScope = id, name, scope
+	pool.WaitMS += wait.Milliseconds()
 }
 
 // noteRoutingSkip records why a later routing stage excluded a provider.
@@ -62,6 +82,10 @@ func (session *recordSession) routingDecision() *contract.RequestRoutingDecision
 		return nil
 	}
 	decision := contract.RequestRoutingDecision{Skipped: []contract.RoutingSkip{}}
+	if trace.pool != nil {
+		pool := *trace.pool
+		decision.Pool = &pool
+	}
 	var selected contract.ServiceID
 	if session.endpointID != nil {
 		selected = *session.endpointID

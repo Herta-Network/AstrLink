@@ -121,12 +121,12 @@ func newSessionHarness(t *testing.T, protocol contract.ProtocolID, path string, 
 		}),
 	}
 	if len(options.tokens) > 0 {
-		dependencies.AccessTokenAuthenticator = AccessTokenAuthenticatorFunc(func(_ context.Context, raw string) (contract.AccessTokenID, error) {
+		dependencies.AccessTokenAuthenticator = AccessTokenAuthenticatorFunc(func(_ context.Context, raw string) (AuthenticatedAccessToken, error) {
 			id, ok := options.tokens[raw]
 			if !ok {
-				return "", errors.New("invalid token")
+				return AuthenticatedAccessToken{}, errors.New("invalid token")
 			}
-			return id, nil
+			return testAccessTokenPrincipal(id), nil
 		})
 	}
 	harness.handler = NewWithDependencies(dependencies)

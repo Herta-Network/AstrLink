@@ -933,6 +933,8 @@ describe("desktop bridge contract", () => {
   it("proxies access-token operations through fixed commands and strict parsers", async () => {
     const secret = `astr_${"A".repeat(43)}`;
     const token = {
+      routing_scope: "global" as const,
+      etag: '"token-routing-v1"',
       id: "token_01",
       name: "VS Code",
       hint: "astr_…K8Q2",
@@ -973,12 +975,15 @@ describe("desktop bridge contract", () => {
       token,
       access_token: secret,
     });
-    await expect(createAccessToken("VS Code")).resolves.toEqual({
+    await expect(
+      createAccessToken("VS Code", { routing_scope: "global" }),
+    ).resolves.toEqual({
       token,
       access_token: secret,
     });
     expect(invokeMock).toHaveBeenLastCalledWith("create_access_token", {
       name: "VS Code",
+      routing: { routing_scope: "global" },
       serviceScope: null,
       serviceIds: null,
     });
@@ -990,13 +995,18 @@ describe("desktop bridge contract", () => {
     };
     invokeMock.mockResolvedValueOnce({ token: limited, access_token: secret });
     await expect(
-      createAccessToken("VS Code", {
-        service_scope: "selected",
-        service_ids: ["service_openai"],
-      }),
+      createAccessToken(
+        "VS Code",
+        { routing_scope: "global" },
+        {
+          service_scope: "selected",
+          service_ids: ["service_openai"],
+        },
+      ),
     ).resolves.toEqual({ token: limited, access_token: secret });
     expect(invokeMock).toHaveBeenLastCalledWith("create_access_token", {
       name: "VS Code",
+      routing: { routing_scope: "global" },
       serviceScope: "selected",
       serviceIds: ["service_openai"],
     });

@@ -14,6 +14,7 @@ type ServiceRecord struct {
 }
 
 type ServiceListOptions struct {
+	PoolID  contract.AccountPoolID
 	Limit   int
 	Cursor  string
 	Enabled *bool

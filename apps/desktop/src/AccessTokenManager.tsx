@@ -1,3 +1,10 @@
+import { TokenRoutingField } from "./components/TokenRoutingField";
+import { listAccountPools, updateAccessTokenRouting } from "./bridge";
+import {
+  parseTokenRouting,
+  type AccountPool,
+  type AccessTokenRouting,
+} from "./account-pool-model";
 import { useDisplayCurrency } from "./currency-display";
 import type { ConversionEngineCapability } from "./core-model";
 import { useWorkspaceSnapshot } from "./workspace-snapshots";
@@ -217,6 +224,20 @@ export function AccessTokenManager({
   const [servicesDraft, setServicesDraft] =
     useState<AccessTokenServicesDraft>(allServices);
   const [creating, setCreating] = useState(false);
+  const [routing, setRouting] = useState<AccessTokenRouting>({
+    routing_scope: "global",
+  });
+  const [pools, setPools] = useState<AccountPool[]>([]);
+  const [poolsReady, setPoolsReady] = useState(false);
+  const [poolsError, setPoolsError] = useState(false);
+  const [scopeToken, setScopeToken] = useState<AccessTokenSummary | null>(null);
+  const [scopeBusy, setScopeBusy] = useState(false);
+  const [scopeError, setScopeError] = useState<string | null>(null);
+  const shownRouting = useExitSnapshot(
+    routing,
+    createOpen || scopeToken !== null,
+  );
+  const shownScopeToken = useExitSnapshot(scopeToken, scopeToken !== null);
   // The dialog covers the page message, so it shows its own failures.
   const [createError, setCreateError] = useState<CreateError | null>(null);
   // Closing clears the draft; keep the exit animation on what was entered.
@@ -249,6 +270,12 @@ export function AccessTokenManager({
     revealGeneration.current += 1;
     usageGeneration.current += 1;
     setCreateOpen(false);
+    setScopeToken(null);
+    setScopeError(null);
+    setScopeBusy(false);
+    setPools([]);
+    setPoolsReady(false);
+    setRouting({ routing_scope: "global" });
     setQuery("");
     setName("");
     setEditing(null);
@@ -266,6 +293,27 @@ export function AccessTokenManager({
   useEffect(() => {
     if (createOpen) nameInput.current?.focus();
   }, [createOpen]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setPoolsReady(false);
+    setPoolsError(false);
+    if (isReady)
+      void listAccountPools().then(
+        (result) => {
+          if (!cancelled) {
+            setPools(result);
+            setPoolsReady(true);
+          }
+        },
+        () => {
+          if (!cancelled) setPoolsError(true);
+        },
+      );
+    return () => {
+      cancelled = true;
+    };
+  }, [coreSessionKey, isReady, createOpen, scopeToken?.id]);
 
   // A client may hold the token on this computer and in WSL distributions.
   const configsUsing = (tokenId: string | undefined) =>
@@ -351,6 +399,7 @@ export function AccessTokenManager({
     setEditing(null);
     setServicesDraft(allServices);
     setCreateError(null);
+    setRouting({ routing_scope: "global" });
   };
 
   const openCreate = () => {
@@ -407,7 +456,7 @@ export function AccessTokenManager({
       });
       return;
     }
-    if (!isReady || creating) return;
+    if (!isReady || creating || (!editing && !poolsReady)) return;
 
     const generation = sessionGeneration.current;
     const target = editing;
@@ -429,9 +478,10 @@ export function AccessTokenManager({
           servicesDraft.scope === "selected"
             ? await createAccessToken(
                 trimmedName,
+                routing,
                 servicesPayload(servicesDraft),
               )
-            : await createAccessToken(trimmedName);
+            : await createAccessToken(trimmedName, routing);
         if (sessionGeneration.current !== generation) return;
         onTokenCreated(result.token);
         setCopiedID(null);
@@ -752,6 +802,29 @@ export function AccessTokenManager({
                             token={token}
                           />
                         </span>
+                        <Button
+                          type="button"
+                          variant="link"
+                          className="h-auto justify-start truncate p-0 text-xs text-muted-foreground"
+                          disabled={!isReady || catalog.stale || scopeBusy}
+                          aria-label={t("pools.editTokenScope", {
+                            name: token.name,
+                          })}
+                          onClick={() => {
+                            setRouting(parseTokenRouting(token));
+                            setScopeError(null);
+                            setScopeToken(token);
+                          }}
+                        >
+                          {token.routing_scope === "global"
+                            ? t("pools.globalScope")
+                            : t("pools.boundTo", {
+                                name:
+                                  pools.find(
+                                    (pool) => pool.id === token.pool_id,
+                                  )?.name ?? token.pool_id,
+                              })}
+                        </Button>
                         <code
                           className="truncate font-mono text-xs text-muted-foreground"
                           title={token.hint}
@@ -990,6 +1063,21 @@ export function AccessTokenManager({
                   value={shownName}
                 />
               </Field>
+              {!shownEditing && (
+                <>
+                  <TokenRoutingField
+                    value={shownRouting}
+                    onChange={setRouting}
+                    pools={pools}
+                    disabled={shownCreating || !poolsReady}
+                  />
+                  {poolsError ? (
+                    <FormMessage tone="error">
+                      {t("pools.scopeUnavailable")}
+                    </FormMessage>
+                  ) : null}
+                </>
+              )}
               {shownCreateError && !shownCreateError.servicesInvalid ? (
                 <FormMessage id="access-token-name-error" tone="error">
                   {shownCreateError.message}
@@ -1021,7 +1109,10 @@ export function AccessTokenManager({
               >
                 {t("common.cancel")}
               </Button>
-              <Button disabled={shownCreating} type="submit">
+              <Button
+                disabled={shownCreating || (!shownEditing && !poolsReady)}
+                type="submit"
+              >
                 {shownEditing
                   ? shownCreating
                     ? t("common.saving")
@@ -1032,6 +1123,84 @@ export function AccessTokenManager({
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={scopeToken !== null}
+        onOpenChange={(open) => {
+          if (!open && !scopeBusy) {
+            setScopeToken(null);
+            setRouting({ routing_scope: "global" });
+          }
+        }}
+      >
+        <DialogContent showCloseButton={!scopeBusy}>
+          <DialogHeader>
+            <DialogTitle>
+              {t("pools.editTokenScope", { name: shownScopeToken?.name ?? "" })}
+            </DialogTitle>
+            <DialogDescription>{t("pools.scopeImpact")}</DialogDescription>
+          </DialogHeader>
+          <TokenRoutingField
+            value={shownRouting}
+            onChange={setRouting}
+            pools={pools}
+            disabled={scopeBusy || !poolsReady}
+          />
+          {poolsError || scopeError ? (
+            <FormMessage tone="error">
+              {scopeError ?? t("pools.scopeUnavailable")}
+            </FormMessage>
+          ) : null}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={scopeBusy}
+              onClick={() => {
+                setScopeToken(null);
+                setRouting({ routing_scope: "global" });
+              }}
+            >
+              {t("common.cancel")}
+            </Button>
+            <Button
+              disabled={
+                scopeBusy ||
+                !poolsReady ||
+                !isReady ||
+                (routing.routing_scope === "pool" &&
+                  !pools.some((pool) => pool.id === routing.pool_id))
+              }
+              onClick={() => {
+                if (!scopeToken || scopeBusy) return;
+                const generation = sessionGeneration.current;
+                setScopeBusy(true);
+                setScopeError(null);
+                void updateAccessTokenRouting(
+                  scopeToken.id,
+                  routing,
+                  scopeToken.etag,
+                )
+                  .then(() => {
+                    if (generation !== sessionGeneration.current) return;
+                    setScopeToken(null);
+                    setRouting({ routing_scope: "global" });
+                    onRefresh();
+                    notify.success(t("pools.scopeUpdated"));
+                  })
+                  .catch((e) => {
+                    if (generation === sessionGeneration.current)
+                      setScopeError(messageOf(e, t("pools.saveFailed")));
+                  })
+                  .finally(() => {
+                    if (generation === sessionGeneration.current)
+                      setScopeBusy(false);
+                  });
+              }}
+            >
+              {t("pools.scopeSave")}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
       {setupToken &&

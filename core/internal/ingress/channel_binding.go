@@ -11,16 +11,23 @@ import (
 )
 
 type channelBindingAttempt struct {
-	store  storage.ChannelBindingStore
-	scope  contract.ChannelBindingScope
-	ttl    time.Duration
-	source string
+	preferred contract.ServiceID
+	store     storage.ChannelBindingStore
+	scope     contract.ChannelBindingScope
+	ttl       time.Duration
+	source    string
 }
 
 // Consume the SAME session resolution as request records (including echo ids
 // and keyed fingerprints). Binding isolation is stricter than record grouping:
 // two principals sharing an explicit conversation id never share preferences.
-func (handler *Handler) prepareChannelBinding(session *recordSession, settings contract.RoutingSettings, loaded bool) *channelBindingAttempt {
+func (handler *Handler) prepareChannelBinding(ctx context.Context, session *recordSession, settings contract.RoutingSettings, loaded bool) *channelBindingAttempt {
+	var poolID contract.AccountPoolID
+	if pool := poolForRequest(ctx); pool != nil {
+		poolID = pool.Pool.ID
+		settings.ChannelStickiness = &pool.Pool.Sticky
+		loaded = true
+	}
 	if session == nil || session.classified.Protocol.IsModelDiscovery() {
 		return nil
 	}
@@ -46,7 +53,7 @@ func (handler *Handler) prepareChannelBinding(session *recordSession, settings c
 	if session.sessionLink != nil {
 		source = string(session.sessionLink.Kind)
 	}
-	return &channelBindingAttempt{store: store, scope: contract.ChannelBindingScope{SessionID: session.sessionID, Principal: principal, Protocol: protocol, Model: session.classified.routingModel()}, ttl: time.Duration(settings.ChannelStickiness.TTLSeconds) * time.Second, source: source}
+	return &channelBindingAttempt{store: store, scope: contract.ChannelBindingScope{PoolID: poolID, SessionID: session.sessionID, Principal: principal, Protocol: protocol, Model: session.classified.routingModel()}, ttl: time.Duration(settings.ChannelStickiness.TTLSeconds) * time.Second, source: source}
 }
 
 // loadRoutingSettings reads the persisted routing settings for one request.
@@ -94,6 +101,7 @@ func (handler *Handler) preferChannelBinding(request *http.Request, session *rec
 				continue
 			}
 			// Stable promotion preserves the configured order of all other services.
+			attempt.preferred = binding.ServiceID
 			candidates = append([]endpoint.Resolved(nil), candidates...)
 			copy(candidates[1:i+1], candidates[:i])
 			candidates[0] = candidate

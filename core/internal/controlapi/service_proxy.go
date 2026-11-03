@@ -24,11 +24,16 @@ func (handler *Handler) probeServiceProxy(writer http.ResponseWriter, request *h
 		return
 	}
 	var input struct {
-		ServiceID contract.ServiceID `json:"service_id,omitempty"`
-		Proxy     json.RawMessage    `json:"proxy"`
-		TargetURL string             `json:"target_url"`
+		ServiceID contract.ServiceID     `json:"service_id,omitempty"`
+		PoolID    contract.AccountPoolID `json:"pool_id,omitempty"`
+		Proxy     json.RawMessage        `json:"proxy"`
+		TargetURL string                 `json:"target_url"`
 	}
 	if !decodeControlJSON(writer, request, &input) {
+		return
+	}
+	if input.ServiceID != "" && input.PoolID != "" {
+		writeError(writer, http.StatusUnprocessableEntity, "invalid_service_proxy", "choose either a service or a pool")
 		return
 	}
 	target, err := url.Parse(input.TargetURL)
@@ -58,7 +63,11 @@ func (handler *Handler) probeServiceProxy(writer http.ResponseWriter, request *h
 	}
 	ctx, cancel := context.WithTimeout(request.Context(), 10*time.Second)
 	defer cancel()
-	ctx, err = handler.bindDraftProxy(ctx, service, input.Proxy)
+	if input.PoolID != "" {
+		ctx, err = handler.bindDraftPoolProxy(ctx, input.PoolID, input.Proxy)
+	} else {
+		ctx, err = handler.bindDraftProxy(ctx, service, input.Proxy)
+	}
 	if err != nil {
 		writeError(writer, http.StatusUnprocessableEntity, "invalid_service_proxy", err.Error())
 		return
@@ -136,9 +145,50 @@ func (handler *Handler) bindDraftProxy(ctx context.Context, service contract.Ser
 	if err := applyServiceProxyInput(&service, &mutation, raw); err != nil {
 		return ctx, err
 	}
-	if mutation.ProxyPresent {
+	if mutation.ProxyPresent && service.Proxy != nil && service.Proxy.Mode == "custom" {
 		return networkproxy.BindConfig(ctx, service.ID, service.Proxy, mutation.Proxy)
 	}
 	secrets, _ := handler.serviceStore.(secretstore.SecretStore)
 	return networkproxy.Bind(ctx, service, secrets)
+}
+
+func (handler *Handler) bindDraftPoolProxy(ctx context.Context, id contract.AccountPoolID, raw json.RawMessage) (context.Context, error) {
+	if err := id.Validate(); err != nil {
+		return ctx, err
+	}
+	pools, ok := handler.serviceStore.(storage.AccountPoolStore)
+	if !ok {
+		return ctx, fmt.Errorf("account pool storage unavailable")
+	}
+	record, err := pools.GetAccountPool(ctx, id)
+	if err != nil {
+		return ctx, err
+	}
+	mutation, err := applyPoolProxyInput(&record.Pool, raw)
+	if err != nil {
+		return ctx, err
+	}
+	config := record.Pool.Proxy
+	credential := mutation.Credential
+	if !mutation.Present && config != nil && config.CredentialRef != "" {
+		secrets, ok := handler.serviceStore.(secretstore.SecretStore)
+		if !ok {
+			return ctx, fmt.Errorf("pool proxy credential unavailable")
+		}
+		value, err := secrets.Get(ctx, secretstore.Ref(config.CredentialRef))
+		if err != nil {
+			return ctx, fmt.Errorf("pool proxy credential unavailable")
+		}
+		defer clear(value)
+		credential = &contract.ProxyCredential{}
+		if json.Unmarshal(value, credential) != nil || credential.Validate() != nil {
+			return ctx, fmt.Errorf("invalid pool proxy credential")
+		}
+	}
+	if config != nil {
+		resolved := *config
+		resolved.CredentialRef = ""
+		config = &resolved
+	}
+	return networkproxy.BindConfig(ctx, "service_proxy_probe", config, credential)
 }

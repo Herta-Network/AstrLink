@@ -1,3 +1,5 @@
+import type { ServiceKind } from "./service-model";
+
 export type ProxyMode = "inherit" | "direct" | "custom";
 export interface ServiceProxy {
   mode: ProxyMode;
@@ -57,6 +59,7 @@ export function proxyDraftWithURL(
 
 export interface ServiceProxyProbeInput {
   service_id?: string;
+  pool_id?: string;
   proxy: ServiceProxyInput;
   target_url: string;
 }
@@ -162,4 +165,20 @@ export function parseServiceProxy(
   } else if (p.url !== undefined || p.credential_ref !== undefined)
     throw new Error("Unexpected proxy fields");
   return p as unknown as ServiceProxy;
+}
+
+export function serviceProxyTestTarget(
+  kind: ServiceKind,
+  baseURL = "",
+): string {
+  const targets: Partial<Record<ServiceKind, string>> = {
+    codex_subscription: "https://chatgpt.com",
+    claude_subscription: "https://api.anthropic.com",
+    grok_subscription: "https://api.x.ai",
+    antigravity_subscription: "https://daily-cloudcode-pa.googleapis.com",
+    copilot_subscription: "https://api.githubcopilot.com",
+    droid_subscription: "https://api.factory.ai",
+    kiro_subscription: "https://codewhisperer.us-east-1.amazonaws.com",
+  };
+  return targets[kind] ?? baseURL.trim();
 }

@@ -24,20 +24,20 @@ func TestAccessTokenScopeRoundTrips(t *testing.T) {
 	selected := contract.AccessTokenServices{
 		Scope: contract.AccessTokenServicesSelected, ServiceIDs: []contract.ServiceID{"service_zhang"},
 	}
-	created, err := manager.Create(ctx, "张三", selected)
+	created, err := manager.Create(ctx, "张三", contract.AccessTokenRouting{RoutingScope: contract.RoutingScopeGlobal}, selected)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	authenticated, err := manager.AuthenticateToken(ctx, created.Value)
+	authenticated, err := manager.AuthenticatePrincipal(ctx, created.Value)
 	if err != nil || !authenticated.Services.Restricted() || !slices.Equal(authenticated.Services.ServiceIDs, selected.ServiceIDs) {
 		t.Fatalf("authenticate = %+v, %v", authenticated.Services, err)
 	}
 
-	plain, err := manager.Create(ctx, "默认")
+	plain, err := manager.Create(ctx, "默认", contract.AccessTokenRouting{RoutingScope: contract.RoutingScopeGlobal})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if token, err := manager.AuthenticateToken(ctx, plain.Value); err != nil || token.Services.Restricted() {
+	if token, err := manager.AuthenticatePrincipal(ctx, plain.Value); err != nil || token.Services.Restricted() {
 		t.Fatalf("unscoped token = %+v, %v", token.Services, err)
 	}
 
@@ -45,7 +45,7 @@ func TestAccessTokenScopeRoundTrips(t *testing.T) {
 	if err != nil || updated.Name != "张三 新" || updated.Services.Restricted() {
 		t.Fatalf("update = %+v, %v", updated, err)
 	}
-	if token, err := manager.AuthenticateToken(ctx, created.Value); err != nil || token.Services.Restricted() {
+	if token, err := manager.AuthenticatePrincipal(ctx, created.Value); err != nil || token.Services.Restricted() {
 		t.Fatalf("token after update = %+v, %v", token.Services, err)
 	}
 	if _, err := manager.Update(ctx, created.Token.ID, "默认", contract.AllAccessTokenServices()); err == nil {
@@ -67,11 +67,11 @@ func TestAccessTokenScopeSyncs(t *testing.T) {
 	selected := contract.AccessTokenServices{
 		Scope: contract.AccessTokenServicesSelected, ServiceIDs: []contract.ServiceID{"service_zhang", "service_team"},
 	}
-	created, err := manager.Create(ctx, "研发组", selected)
+	created, err := manager.Create(ctx, "研发组", contract.AccessTokenRouting{RoutingScope: contract.RoutingScopeGlobal}, selected)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := manager.Create(ctx, "默认"); err != nil {
+	if _, err := manager.Create(ctx, "默认", contract.AccessTokenRouting{RoutingScope: contract.RoutingScopeGlobal}); err != nil {
 		t.Fatal(err)
 	}
 	entities, err := source.SyncEntities(ctx, syncKindAccessToken)

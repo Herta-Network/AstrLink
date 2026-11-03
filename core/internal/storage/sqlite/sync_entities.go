@@ -24,6 +24,10 @@ func (store *Store) SyncEntities(ctx context.Context, kind string) ([]storage.Sy
 		return nil, err
 	}
 	switch kind {
+	case syncKindAccountPool:
+		return store.syncAccountPools(ctx)
+	case syncKindPoolProxyCredential:
+		return store.syncSecrets(ctx, kind, times, `SELECT pool_id, credential_value, sealed FROM account_pool_proxy_credentials`, accountPoolProxyCredentialsTable)
 	case syncKindService:
 		// The plan of a subscription account is what this device's usage
 		// reads reported; another device observes its own.
@@ -135,8 +139,8 @@ func (store *Store) syncSecrets(ctx context.Context, kind string, times map[stri
 // A missing or unreadable value aborts the snapshot. Omitting that token would
 // make the three-way merge interpret the read failure as a local deletion.
 func (store *Store) syncAccessTokens(ctx context.Context, times map[string]string) ([]storage.SyncLocalEntity, error) {
-	rows, err := store.db.QueryContext(ctx, `SELECT token.id, token.name, token.source, token.created_at,
-    token.service_scope, token.service_ids_json, secret.token_value, COALESCE(secret.sealed, 1)
+	rows, err := store.db.QueryContext(ctx, `SELECT token.id, token.name, token.source, token.created_at, token.service_scope, token.service_ids_json, token.routing_scope, COALESCE(token.pool_id, ''),
+    secret.token_value, COALESCE(secret.sealed, 1)
 FROM local_access_tokens token
 LEFT JOIN local_access_token_secrets secret ON secret.token_id = token.id`)
 	if err != nil {
@@ -145,10 +149,10 @@ LEFT JOIN local_access_token_secrets secret ON secret.token_id = token.id`)
 	defer rows.Close()
 	var entities []storage.SyncLocalEntity
 	for rows.Next() {
-		var id, name, source, createdAt, scope, serviceIDs string
+		var id, name, source, createdAt, scope, serviceIDs, routingScope, poolID string
 		var stored []byte
 		var sealed bool
-		if err := rows.Scan(&id, &name, &source, &createdAt, &scope, &serviceIDs, &stored, &sealed); err != nil {
+		if err := rows.Scan(&id, &name, &source, &createdAt, &scope, &serviceIDs, &routingScope, &poolID, &stored, &sealed); err != nil {
 			return nil, fmt.Errorf("read %s: %w", syncKindAccessToken, err)
 		}
 		plaintext, err := store.openSecret(accessTokenSecretsTable, id, stored, sealed)
@@ -161,9 +165,10 @@ LEFT JOIN local_access_token_secrets secret ON secret.token_id = token.id`)
 			return nil, fmt.Errorf("read %s %s: %w", syncKindAccessToken, id, err)
 		}
 		record := contract.AccessTokenDocument{
-			Name:      name,
-			Source:    source,
-			CreatedAt: parseEntityTime(createdAt),
+			AccessTokenRouting: contract.AccessTokenRouting{RoutingScope: contract.RoutingScope(routingScope), PoolID: contract.AccountPoolID(poolID)},
+			Name:               name,
+			Source:             source,
+			CreatedAt:          parseEntityTime(createdAt),
 		}
 		// An unrestricted token keeps the document older builds read.
 		if services.Restricted() {
@@ -218,12 +223,17 @@ func (store *Store) SyncServiceOrder(ctx context.Context) ([]contract.ServiceID,
 // while being earlier in fact.
 func syncEntityTimeQuery(kind string) string {
 	later := func(left, right string) string {
-		return "CASE WHEN julianday(" + left + ") >= julianday(" + right + ") THEN " + left + " ELSE " + right + " END"
+		return "CASE WHEN " + right + " IS NULL OR julianday(" + left + ") >= julianday(" + right + ") THEN " + left + " ELSE " + right + " END"
 	}
 	lastChange := func(kind, id string) string {
 		return "(SELECT MAX(changed_at) FROM config_change_log WHERE entity_kind = '" + kind + "' AND entity_id = " + id + ")"
 	}
 	switch kind {
+	case syncKindAccountPool:
+		return `SELECT id, updated_at FROM account_pools`
+	case syncKindPoolProxyCredential:
+		change := lastChange(syncKindPoolProxyCredential, "credential.pool_id")
+		return `SELECT credential.pool_id, ` + later("pool.updated_at", change) + ` FROM account_pool_proxy_credentials credential JOIN account_pools pool ON pool.id=credential.pool_id`
 	case syncKindService:
 		return `SELECT id, updated_at FROM services`
 	case syncKindServiceCredential:
@@ -271,7 +281,12 @@ func (store *Store) SyncImportCredential(ctx context.Context, kind, localID stri
 }
 
 // SyncDeleteCredential removes one credential a merge decided is gone.
-func (store *Store) SyncDeleteCredential(ctx context.Context, kind, localID string) error {
+func (store *Store) SyncDeleteCredential(ctx context.Context, kind, localID string) (err error) {
+	defer func() {
+		if err == nil {
+			store.notifyAccountPools()
+		}
+	}()
 	table, err := syncCredentialTable(kind)
 	if err != nil {
 		return err
@@ -286,6 +301,8 @@ func (store *Store) SyncDeleteCredential(ctx context.Context, kind, localID stri
 // syncCredentialTable names the table one credential kind is stored in.
 func syncCredentialTable(kind string) (string, error) {
 	switch kind {
+	case syncKindPoolProxyCredential:
+		return accountPoolProxyCredentialsTable, nil
 	case syncKindServiceCredential:
 		return serviceCredentialsTable, nil
 	case syncKindServiceProxyCredential:

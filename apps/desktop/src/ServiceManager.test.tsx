@@ -1791,7 +1791,7 @@ describe("ServiceManager", () => {
       )?.value,
     ).toBe("");
     expect(container.textContent).toContain("保留已保存认证");
-    await chooseOption("代理模式", "继承全局");
+    await chooseOption("代理模式", "继承号池或全局");
     await act(async () =>
       container
         .querySelector("form")!
@@ -7447,6 +7447,8 @@ describe("ServiceManager", () => {
   it("warns before deleting the last provider a limited token may use", async () => {
     const token = {
       id: "token_zhang",
+      routing_scope: "global" as const,
+      etag: '"scope-v1"',
       name: "张三",
       hint: "astr_…K8Q2",
       source: "user" as const,

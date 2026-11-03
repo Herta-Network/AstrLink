@@ -179,6 +179,11 @@ export function routeRowSummary(
       }
     }
   }
+  if (last && decision?.pool) {
+    parts.push(i18n.t("pools.routingPool", { name: decision.pool.name }));
+    if (decision.pool.wait_ms > 0)
+      parts.push(i18n.t("pools.routingWait", { ms: decision.pool.wait_ms }));
+  }
   if (last && decision && record) {
     const named = new Set(
       record.events

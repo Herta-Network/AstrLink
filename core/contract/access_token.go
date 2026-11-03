@@ -25,6 +25,7 @@ func (id AccessTokenID) Validate() error {
 // selected providers. A build that predates them refuses such a document and
 // leaves the token out instead of storing it without its limit.
 type AccessTokenDocument struct {
+	AccessTokenRouting
 	Name         string      `json:"name"`
 	Source       string      `json:"source"`
 	CreatedAt    time.Time   `json:"created_at"`

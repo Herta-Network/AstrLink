@@ -16,6 +16,8 @@ function token(
     hint: "astr_…0000",
     source,
     created_at,
+    routing_scope: "global",
+    etag: '"scope-v1"',
     service_scope: "all",
     service_ids: [],
   };

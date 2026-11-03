@@ -15,7 +15,9 @@ import (
 	"time"
 
 	"github.com/QuantumNous/astrlink/core/contract"
+	"github.com/QuantumNous/astrlink/core/internal/accesstoken"
 	"github.com/QuantumNous/astrlink/core/internal/accountauth"
+	"github.com/QuantumNous/astrlink/core/internal/accountpool"
 	"github.com/QuantumNous/astrlink/core/internal/claudeofficial"
 	"github.com/QuantumNous/astrlink/core/internal/endpoint"
 	"github.com/QuantumNous/astrlink/core/internal/networkproxy"
@@ -163,7 +165,10 @@ func (handler *Handler) executeCandidatesWithTest(
 	var lastNetworkFailure executionFailure
 	var replayLastHTTP func()
 	records := recordSessionFromContext(request.Context())
+	releaseAdmission := handler.installPoolAdmission(request, classified, &candidates, schedule, body, test)
+	defer func() { releaseAdmission(records != nil && records.status == contract.RequestStatusSucceeded) }()
 	for {
+		releaseAdmission(false)
 		candidateIndex, hasNext := schedule.next(request.Context())
 		if !hasNext {
 			break
@@ -503,6 +508,9 @@ func (handler *Handler) executeCandidatesWithTest(
 			officialDiagnostics = claudeOfficialDiagnostics(attemptRequest)
 		case authorizeErr == nil:
 			proxyContext, authorizeErr = networkproxy.Bind(proxyContext, candidate.Service, handler.proxyCredentials)
+			if authorizeErr != nil && poolForRequest(request.Context()) != nil {
+				authorizeErr = fmt.Errorf("%w: %w", networkproxy.ErrProxyUnavailable, authorizeErr)
+			}
 			attemptRequest = attemptRequest.WithContext(proxyContext)
 		}
 		if loopback != nil && authorizeErr == nil {
@@ -662,8 +670,8 @@ func (handler *Handler) executeCandidatesWithTest(
 			RequestHeaders: headers,
 		}
 		if candidate.Service.Kind == contract.ServiceKindKiroSubscription {
-			caller, _ := AccessTokenIDFromContext(request.Context())
-			forwardTarget.Kiro = &transport.KiroAttempt{Resolve: handler.resolveKiro, Model: upstreamModel, Auxiliary: haiku, Caller: caller}
+			principal, _ := accesstoken.PrincipalFromContext(request.Context())
+			forwardTarget.Kiro = &transport.KiroAttempt{Resolve: handler.resolveKiro, Model: upstreamModel, Auxiliary: haiku, Caller: principal.ID}
 		}
 		attemptStarted := false
 		forwardTarget.ObserveOutbound = func(outbound *http.Request) {
@@ -792,7 +800,7 @@ func (handler *Handler) executeCandidatesWithTest(
 					return inspected, inspectedComplete
 				}
 				var risk subscriptionRiskSignal
-				if protection.risk && handler.subscriptionRisk != nil && subscriptionRiskKind(candidate.Service.Kind) {
+				if protection.risk && (handler.subscriptionRisk != nil || handler.poolRuntime != nil) && subscriptionRiskKind(candidate.Service.Kind) {
 					if startFailure != nil {
 						// The stream watcher reports the event for the account when
 						// the held bytes pass it.
@@ -849,7 +857,7 @@ func (handler *Handler) executeCandidatesWithTest(
 				if risk.scope == subscriptionRiskModel {
 					retryAfter = max(retryAfter, risk.cooldown)
 				}
-				if test == nil && status == http.StatusTooManyRequests {
+				if test == nil && status == http.StatusTooManyRequests && !(handler.poolRuntime != nil && risk.quotaExhausted()) {
 					if cooldown, ok := handler.resolver.(endpoint.RateLimitController); ok {
 						duration := max(retryAfter, time.Duration(policy.InitialDelayMS)*time.Millisecond)
 						if until := risk.observation.PausedUntil; accountBlocked && until != nil {
@@ -1192,6 +1200,10 @@ func (handler *Handler) executeCandidatesWithTest(
 		}
 		return
 	}
+	if schedule.admissionError != nil {
+		handler.writeResolveError(downstream, request, classified, schedule.admissionError)
+		return
+	}
 	if replayLastHTTP != nil {
 		replayLastHTTP()
 		return
@@ -1235,6 +1247,10 @@ func (handler *Handler) writeExecutionFailure(
 	failure executionFailure,
 ) {
 	session := recordSessionFromContext(request.Context())
+	if poolForRequest(request.Context()) != nil && errors.Is(failure.err, networkproxy.ErrProxyUnavailable) {
+		handler.writeResolveError(writer, request, classified, accountpool.ErrProxyUnavailable)
+		return
+	}
 	switch failure.kind {
 	case executionFailureCapability:
 		writePlannerCapability(writer, failure.capability)
@@ -1330,6 +1346,7 @@ func requiresInspectedJSON(protocol contract.ProtocolID) bool {
 }
 
 type requestBodySource struct {
+	size       int64
 	request    *http.Request
 	factory    func() (io.ReadCloser, error)
 	first      io.ReadCloser
@@ -1339,7 +1356,7 @@ type requestBodySource struct {
 }
 
 func captureRequestBody(request *http.Request, forceBuffer bool) (*requestBodySource, error) {
-	source := &requestBodySource{request: request}
+	source := &requestBodySource{request: request, size: request.ContentLength}
 	if existing, ok := request.Body.(*metadataPermitBody); ok {
 		source.release = existing.transferPermit()
 	}
@@ -1349,6 +1366,25 @@ func captureRequestBody(request *http.Request, forceBuffer bool) (*requestBodySo
 		return source, nil
 	}
 	if request.GetBody != nil {
+		if source.size <= 0 {
+			reader, err := request.GetBody()
+			if err != nil {
+				source.Close()
+				return nil, err
+			}
+			size, readErr := io.Copy(io.Discard, reader)
+			closeErr := reader.Close()
+			if readErr != nil {
+				source.Close()
+				return nil, readErr
+			}
+			if closeErr != nil {
+				source.Close()
+				return nil, closeErr
+			}
+			source.size = size
+		}
+
 		if _, capturing := request.Body.(*captureTee); capturing {
 			// The body factory reuses bytes classification already buffered,
 			// but the inbound audit tee still needs to observe the original.
@@ -1385,6 +1421,7 @@ func captureRequestBody(request *http.Request, forceBuffer bool) (*requestBodySo
 		return nil, err
 	}
 	contents := buffered
+	source.size = int64(len(buffered))
 	source.replayable = true
 	source.factory = func() (io.ReadCloser, error) {
 		return io.NopCloser(bytes.NewReader(contents)), nil

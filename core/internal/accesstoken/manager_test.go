@@ -70,7 +70,9 @@ func (store *fakeAccessTokenStore) FindAccessTokenByHash(_ context.Context, hash
 
 func metadataFromCandidate(candidate storage.NewAccessToken) storage.AccessTokenMetadata {
 	return storage.AccessTokenMetadata{
+		AccessTokenRouting: contract.AccessTokenRouting{RoutingScope: contract.RoutingScopeGlobal}, RoutingRevision: 1,
 		ID: candidate.ID, Name: candidate.Name, Hint: candidate.Hint,
+
 		CreatedAt: time.Date(2026, 7, 24, 1, 2, 3, 0, time.UTC),
 	}
 }
@@ -84,7 +86,7 @@ func TestCreateGeneratesCanonicalTokenAndSafeMetadata(t *testing.T) {
 	randomBytes := append(bytes.Repeat([]byte{0x11}, idRandomBytes), bytes.Repeat([]byte{0x22}, tokenRandomBytes)...)
 	manager.random = bytes.NewReader(randomBytes)
 
-	created, err := manager.Create(context.Background(), "  Build Agent  ")
+	created, err := manager.Create(context.Background(), "  Build Agent  ", contract.AccessTokenRouting{RoutingScope: contract.RoutingScopeGlobal})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -142,7 +144,7 @@ func TestCreateRejectsInvalidNamesBeforeGeneratingOrStoring(t *testing.T) {
 			t.Fatal(err)
 		}
 		manager.random = bytes.NewReader(nil)
-		if _, err := manager.Create(context.Background(), name); !errors.Is(err, ErrInvalidName) {
+		if _, err := manager.Create(context.Background(), name, contract.AccessTokenRouting{RoutingScope: contract.RoutingScopeGlobal}); !errors.Is(err, ErrInvalidName) {
 			t.Fatalf("Create(%q) error = %v", name, err)
 		}
 		if store.createCalls != 0 {
@@ -176,6 +178,7 @@ func TestAuthenticateHashesCanonicalValueAndCollapsesInvalidRecords(t *testing.T
 			store := &fakeAccessTokenStore{
 				findErr: test.findErr,
 				findRecord: storage.AccessTokenMetadata{
+					AccessTokenRouting: contract.AccessTokenRouting{RoutingScope: contract.RoutingScopeGlobal}, RoutingRevision: 1,
 					ID:   "access_token_stable",
 					Hint: hint,
 				},

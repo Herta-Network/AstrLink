@@ -43,6 +43,9 @@ func (handler *Handler) sessionChannelBinding(writer http.ResponseWriter, reques
 			handler.writeStoreError(writer, err)
 			return
 		}
+		if handler.poolRuntime != nil {
+			handler.poolRuntime.Scheduler.ForgetSession(id)
+		}
 	}
 	audit, err := store.GetChannelBindingAudit(request.Context(), id, before)
 	if err != nil {

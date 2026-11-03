@@ -15,6 +15,14 @@ type ServiceProxy struct {
 }
 
 func (proxy *ServiceProxy) Validate(id ServiceID) error {
+	return proxy.validateReference("local://service-proxy/" + string(id))
+}
+
+func (proxy *ServiceProxy) ValidateForPool(id AccountPoolID) error {
+	return proxy.validateReference("local://pool-proxy/" + string(id))
+}
+
+func (proxy *ServiceProxy) validateReference(reference string) error {
 	if proxy == nil {
 		return nil
 	}
@@ -27,7 +35,7 @@ func (proxy *ServiceProxy) Validate(id ServiceID) error {
 		if err := ValidateProxyURL(proxy.URL); err != nil {
 			return err
 		}
-		if proxy.CredentialRef != "" && proxy.CredentialRef != "local://service-proxy/"+string(id) {
+		if proxy.CredentialRef != "" && proxy.CredentialRef != reference {
 			return fmt.Errorf("invalid proxy credential reference")
 		}
 	default:

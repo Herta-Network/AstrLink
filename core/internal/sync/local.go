@@ -36,10 +36,12 @@ func inScope(scope contract.SyncScope) map[string]bool {
 	kinds := map[string]bool{}
 	if scope.Services {
 		kinds[KindService] = true
+		kinds[KindAccountPool] = true
 	}
 	if scope.Services && scope.Credentials {
 		kinds[KindServiceCredential] = true
 		kinds[KindServiceProxyCredential] = true
+		kinds[KindPoolProxyCredential] = true
 		kinds[KindBuiltinToolCredential] = true
 	}
 	if scope.Policies {
@@ -214,6 +216,11 @@ func pruneOrphans(document *Document) {
 			}
 		}
 	}
+	for id := range document.Entities[KindPoolProxyCredential] {
+		if _, ok := document.Get(KindAccountPool, id); !ok {
+			delete(document.Entities[KindPoolProxyCredential], id)
+		}
+	}
 }
 
 // apply writes the merged package into this device's store: the entities the
@@ -272,10 +279,40 @@ func (engine *Engine) currentEntities(ctx context.Context, kinds map[string]bool
 func (engine *Engine) writeEntities(ctx context.Context, merged Document, held map[string]map[string]bool, kinds map[string]bool) error {
 	// Providers first: every other kind references them, and a credential or a
 	// price binding for a provider that is not written yet has nowhere to go.
-	order := []string{KindService, KindPolicy, KindPricingConfig, KindAccessToken}
+	order := []string{KindService, KindAccountPool, KindPolicy, KindPricingConfig, KindAccessToken}
 	order = append(order, CredentialKinds()...)
 	for _, kind := range order {
 		if !kinds[kind] {
+			continue
+		}
+		if kind == KindAccountPool {
+			changes := []storage.AccountPoolSyncChange{}
+			seen := map[string]bool{}
+			for id, entity := range merged.Entities[kind] {
+				changes = append(changes, storage.AccountPoolSyncChange{ID: contract.AccountPoolID(id), Document: entity.Document, Deleted: entity.Deleted})
+				seen[id] = true
+			}
+			for id := range held[kind] {
+				if !seen[id] {
+					changes = append(changes, storage.AccountPoolSyncChange{ID: contract.AccountPoolID(id), Deleted: true})
+				}
+			}
+			if len(changes) > 0 {
+				pools, ok := engine.store.(storage.AccountPoolSyncStore)
+				if !ok {
+					return fmt.Errorf("account pool sync store is unavailable")
+				}
+				if err := pools.SyncWriteAccountPools(ctx, changes); err != nil {
+					return err
+				}
+				for _, change := range changes {
+					if !change.Deleted {
+						if err := engine.store.DeleteTombstone(ctx, kind, string(change.ID)); err != nil {
+							return err
+						}
+					}
+				}
+			}
 			continue
 		}
 		for id, entity := range merged.Entities[kind] {
@@ -355,7 +392,7 @@ func (engine *Engine) writeAccessToken(ctx context.Context, id string, entity En
 // deletion is also recorded as a tombstone, so a device that still has the
 // entity learns it is gone instead of uploading it again.
 func (engine *Engine) deleteEntities(ctx context.Context, merged Document, held map[string]map[string]bool, kinds map[string]bool) error {
-	for _, kind := range Kinds() {
+	for _, kind := range []string{KindAccessToken, KindPoolProxyCredential, KindAccountPool, KindServiceCredential, KindServiceProxyCredential, KindBuiltinToolCredential, KindPricingConfig, KindPolicy, KindService} {
 		if !kinds[kind] {
 			continue
 		}

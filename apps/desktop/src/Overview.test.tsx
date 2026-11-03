@@ -177,6 +177,8 @@ const readyTokens: AccessTokenCatalog = {
   status: "ready",
   items: [
     {
+      routing_scope: "global" as const,
+      etag: '"token-routing-v1"',
       id: "token_01",
       name: "VS Code",
       hint: "astr_…K8Q2",
@@ -1055,6 +1057,8 @@ describe("Overview", () => {
       items: [
         readyTokens.items[0],
         {
+          routing_scope: "global" as const,
+          etag: '"token-routing-v1"',
           id: "token_02",
           name: "Terminal",
           hint: "astr_…T2",
@@ -1064,6 +1068,8 @@ describe("Overview", () => {
           service_ids: [],
         },
         {
+          routing_scope: "global" as const,
+          etag: '"token-routing-v1"',
           id: "token_03",
           name: "CI",
           hint: "astr_…C3",

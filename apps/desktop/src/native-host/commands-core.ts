@@ -13,6 +13,7 @@ import {
   Tokens,
   Usage,
 } from "../mygo";
+import type { AccessTokenRouting } from "../account-pool-model";
 import type { CommandTable } from "./types";
 
 // Commands bound in commands_core.go: Core's lifecycle, preferences, links,
@@ -151,15 +152,38 @@ export const coreCommands = {
     Audit.updateAuditSettings(a.patch),
   local_data_status: () => Audit.localDataStatus(),
 
+  list_account_pools: () => Services.listAccountPools(),
+  get_account_pool: (a: { poolId: string }) =>
+    Services.getAccountPool(a.poolId),
+  create_account_pool: (a: { input: unknown }) =>
+    Services.createAccountPool(a.input),
+  update_account_pool: (a: { poolId: string; etag: string; patch: unknown }) =>
+    Services.updateAccountPool(a.poolId, a.etag, a.patch),
+  replace_account_pool_members: (a: {
+    poolId: string;
+    etag: string;
+    members: unknown;
+  }) => Services.replaceAccountPoolMembers(a.poolId, a.etag, a.members),
+  delete_account_pool: (a: { poolId: string; etag: string }) =>
+    Services.deleteAccountPool(a.poolId, a.etag),
+  probe_account_pool_quota: (a: { poolId: string; serviceId: string }) =>
+    Services.probeAccountPoolQuota(a.poolId, a.serviceId),
+  update_access_token_routing: (a: {
+    tokenId: string;
+    etag: string;
+    routing: unknown;
+  }) => Tokens.updateAccessTokenRouting(a.tokenId, a.etag, a.routing),
   list_access_tokens: () => Tokens.listAccessTokens(),
   list_network_addresses: () => Tokens.listNetworkAddresses(),
   create_access_token: (a: {
     name: string;
+    routing: AccessTokenRouting;
     serviceScope?: string | null;
     serviceIds?: string[] | null;
   }) =>
     Tokens.createAccessToken(
       a.name,
+      a.routing,
       a.serviceScope ?? null,
       a.serviceIds ?? [],
     ),

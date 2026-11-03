@@ -3,6 +3,8 @@ package subscription_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -84,5 +86,60 @@ func TestCachedUsageKeepsTheLastSnapshot(t *testing.T) {
 	}
 	if usage, ok := manager.CachedUsage(id); ok {
 		t.Fatalf("CachedUsage() after sign-out = %#v", usage)
+	}
+}
+
+func TestUsageCoalescesConcurrentRefreshAndCancelsWaiter(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	entered := make(chan struct{}, 2)
+	release := make(chan struct{})
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/codex/usage" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		calls.Add(1)
+		entered <- struct{}{}
+		select {
+		case <-release:
+		case <-r.Context().Done():
+			return
+		}
+		io.WriteString(w, `{"rate_limit":{"primary_window":{"used_percent":10,"limit_window_seconds":18000}}}`)
+	}))
+	defer upstream.Close()
+	fixture := newRiskTestFixture(t, accountauth.OAuthConfig{APIBaseURL: upstream.URL, HTTPClient: upstream.Client()})
+	done := make(chan error, 2)
+	go func() { _, err := fixture.manager.Usage(ctx, fixture.id); done <- err }()
+	select {
+	case <-entered:
+	case err := <-done:
+		t.Fatalf("leader returned early: %v", err)
+	case <-ctx.Done():
+		t.Fatal("leader never queried usage")
+	}
+	waiting, stop := context.WithCancel(ctx)
+	stop()
+	_, err := fixture.manager.Usage(waiting, fixture.id)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled waiter: %v", err)
+	}
+	go func() { _, err := fixture.manager.Usage(ctx, fixture.id); done <- err }()
+	close(release)
+	for range 2 {
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-ctx.Done():
+			t.Fatal("usage reads did not finish")
+		}
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("overlapping reads made %d queries", calls.Load())
 	}
 }

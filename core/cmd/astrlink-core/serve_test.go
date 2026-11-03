@@ -311,7 +311,7 @@ func TestServeRunsTheServerEditionOnOnePort(t *testing.T) {
 		t.Fatalf("login = %d", login.StatusCode)
 	}
 
-	created := send(clientRequest{method: http.MethodPost, path: controlapi.AccessTokensPath, body: `{"name":"laptop"}`, header: pageHeader, cookie: session})
+	created := send(clientRequest{method: http.MethodPost, path: controlapi.AccessTokensPath, body: `{"routing_scope":"global","name":"laptop"}`, header: pageHeader, cookie: session})
 	if created.StatusCode != http.StatusCreated {
 		t.Fatalf("create access token = %d", created.StatusCode)
 	}
@@ -478,7 +478,7 @@ func TestServeResetSwitchClearsThePasswordOncePerValue(t *testing.T) {
 	}
 	setup := clientRequest{method: http.MethodPost, path: console.SetupPath, body: passwordBody, header: pageHeader}.send(t, direct, running.address)
 	session := sessionCookieOf(t, setup)
-	created := clientRequest{method: http.MethodPost, path: controlapi.AccessTokensPath, body: `{"name":"laptop"}`, header: pageHeader, cookie: session}.
+	created := clientRequest{method: http.MethodPost, path: controlapi.AccessTokensPath, body: `{"routing_scope":"global","name":"laptop"}`, header: pageHeader, cookie: session}.
 		send(t, direct, running.address)
 	var secret struct {
 		AccessToken string `json:"access_token"`
@@ -542,7 +542,7 @@ func TestConsumePasswordResetDiscardsRawPartsAndKeepsCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	token, err := tokens.Create(ctx, "laptop")
+	token, err := tokens.Create(ctx, "laptop", contract.AccessTokenRouting{RoutingScope: contract.RoutingScopeGlobal})
 	if err != nil {
 		t.Fatal(err)
 	}

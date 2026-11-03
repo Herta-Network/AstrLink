@@ -87,6 +87,15 @@ x-astrlink-implementation:
     - GET /control/v1/services/{service_id}/risk-events
     - GET /control/v1/service-packages
     - PATCH /control/v1/service-packages/{package_id}
+    - GET /control/v1/account-pools
+    - POST /control/v1/account-pools
+    - GET /control/v1/account-pools/{pool_id}
+    - PATCH /control/v1/account-pools/{pool_id}
+    - DELETE /control/v1/account-pools/{pool_id}
+    - PUT /control/v1/account-pools/{pool_id}/members
+    - POST /control/v1/account-pools/{pool_id}/members/{service_id}/quota-probe
+    - GET /control/v1/access-tokens/{token_id}
+    - PATCH /control/v1/access-tokens/{token_id}
     - GET /control/v1/access-tokens
     - GET /control/v1/access-token-usage
     - GET /control/v1/usage-summary
@@ -957,7 +966,7 @@ paths:
       tags: [Services]
       operationId: probeServiceProxy
       summary: Test an unsaved custom proxy against an HTTP target.
-      description: Sends a HEAD request with a 10-second timeout, without saving the draft, sending API credentials, or following redirects. An omitted proxy credential reuses the given service's stored proxy authentication; null clears it for this test only. An HTTP response other than 407 confirms a response was received, not API authorization.
+      description: Sends a HEAD request with a 10-second timeout, without saving the draft, sending API credentials, or following redirects. An omitted proxy credential reuses the given service or pool's stored proxy authentication; service_id and pool_id are mutually exclusive; null clears it for this test only. An HTTP response other than 407 confirms a response was received, not API authorization.
       requestBody:
         required: true
         content:
@@ -968,6 +977,8 @@ paths:
               properties:
                 service_id:
                   $ref: ./protocol-capabilities.schema.json#/$defs/ResourceId
+                pool_id:
+                  $ref: ./protocol-capabilities.schema.json#/$defs/ResourceId
                 proxy:
                   allOf:
                     - $ref: "#/components/schemas/ServiceProxyInput"
@@ -977,6 +988,8 @@ paths:
                   type: string
                   maxLength: 2048
                   description: HTTP or HTTPS target without userinfo, query or fragment.
+              not:
+                required: [service_id, pool_id]
               additionalProperties: false
       responses:
         "200":
@@ -1526,6 +1539,266 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+  "/control/v1/account-pools":
+    "x-astrlink-implementation-status": "implemented"
+    "get":
+      "x-astrlink-role": "observer"
+      "tags":
+        - "Account Pools"
+      "operationId": "listAccountPools"
+      "summary": "List subscription account pools and runtime summaries."
+      "responses":
+        "200":
+          "description": "Operation completed."
+          "content":
+            "application/json":
+              "schema":
+                "type": "object"
+                "required":
+                  - "items"
+                "properties":
+                  "items":
+                    "type": "array"
+                    "items":
+                      "$ref": "#/components/schemas/AccountPool"
+                "additionalProperties": false
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/UnprocessableEntity"
+    "post":
+      "x-astrlink-role": "operator"
+      "tags":
+        - "Account Pools"
+      "operationId": "createAccountPool"
+      "summary": "Create a pool for one subscription provider."
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/AccountPoolCreate"
+      "responses":
+        "201":
+          "description": "Account pool configuration and current runtime summary."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/AccountPool"
+          "headers":
+            "ETag":
+              "$ref": "#/components/headers/ETag"
+            "Location":
+              "$ref": "#/components/headers/Location"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/UnprocessableEntity"
+  "/control/v1/account-pools/{pool_id}":
+    "x-astrlink-implementation-status": "implemented"
+    "parameters":
+      - "name": "pool_id"
+        "in": "path"
+        "required": true
+        "schema":
+          "$ref": "./protocol-capabilities.schema.json#/$defs/ResourceId"
+    "get":
+      "x-astrlink-role": "observer"
+      "tags":
+        - "Account Pools"
+      "operationId": "getAccountPool"
+      "summary": "Read a pool and its strong ETag."
+      "responses":
+        "200":
+          "description": "Account pool configuration and current runtime summary."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/AccountPool"
+          "headers":
+            "ETag":
+              "$ref": "#/components/headers/ETag"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/UnprocessableEntity"
+    "patch":
+      "x-astrlink-role": "operator"
+      "tags":
+        - "Account Pools"
+      "operationId": "updateAccountPool"
+      "summary": "Update pool settings without changing its provider."
+      "parameters":
+        - "$ref": "#/components/parameters/IfMatch"
+      "requestBody":
+        "required": true
+        "content":
+          "application/merge-patch+json":
+            "schema":
+              "$ref": "#/components/schemas/AccountPoolPatch"
+      "responses":
+        "200":
+          "description": "Account pool configuration and current runtime summary."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/AccountPool"
+          "headers":
+            "ETag":
+              "$ref": "#/components/headers/ETag"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "412":
+          "$ref": "#/components/responses/PreconditionFailed"
+        "422":
+          "$ref": "#/components/responses/UnprocessableEntity"
+        "428":
+          "$ref": "#/components/responses/PreconditionRequired"
+    "delete":
+      "x-astrlink-role": "operator"
+      "tags":
+        - "Account Pools"
+      "operationId": "deleteAccountPool"
+      "summary": "Delete an idle pool with no key references; keep accounts."
+      "parameters":
+        - "$ref": "#/components/parameters/IfMatch"
+      "responses":
+        "204":
+          "description": "Operation completed."
+          "headers":
+            "ETag":
+              "$ref": "#/components/headers/ETag"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "412":
+          "$ref": "#/components/responses/PreconditionFailed"
+        "422":
+          "$ref": "#/components/responses/UnprocessableEntity"
+        "428":
+          "$ref": "#/components/responses/PreconditionRequired"
+  "/control/v1/account-pools/{pool_id}/members":
+    "x-astrlink-implementation-status": "implemented"
+    "parameters":
+      - "name": "pool_id"
+        "in": "path"
+        "required": true
+        "schema":
+          "$ref": "./protocol-capabilities.schema.json#/$defs/ResourceId"
+    "put":
+      "x-astrlink-role": "operator"
+      "tags":
+        - "Account Pools"
+      "operationId": "replaceAccountPoolMembers"
+      "summary": "Atomically replace members; reject other providers, duplicate ownership and Claude CLI accounts."
+      "parameters":
+        - "$ref": "#/components/parameters/IfMatch"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "type": "object"
+              "required":
+                - "members"
+              "properties":
+                "members":
+                  "type": "array"
+                  "items":
+                    "$ref": "#/components/schemas/AccountPoolMemberInput"
+              "additionalProperties": false
+      "responses":
+        "200":
+          "description": "Account pool configuration and current runtime summary."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/AccountPool"
+          "headers":
+            "ETag":
+              "$ref": "#/components/headers/ETag"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "412":
+          "$ref": "#/components/responses/PreconditionFailed"
+        "422":
+          "$ref": "#/components/responses/UnprocessableEntity"
+        "428":
+          "$ref": "#/components/responses/PreconditionRequired"
+  "/control/v1/account-pools/{pool_id}/members/{service_id}/quota-probe":
+    "x-astrlink-implementation-status": "implemented"
+    "parameters":
+      - "name": "pool_id"
+        "in": "path"
+        "required": true
+        "schema":
+          "$ref": "./protocol-capabilities.schema.json#/$defs/ResourceId"
+      - "$ref": "#/components/parameters/ServiceId"
+    "post":
+      "x-astrlink-role": "operator"
+      "tags":
+        - "Account Pools"
+      "operationId": "probeAccountPoolQuota"
+      "summary": "Allow one subsequent normal client request to probe quota recovery."
+      "responses":
+        "200":
+          "description": "Operation completed."
+          "content":
+            "application/json":
+              "schema":
+                "type": "object"
+                "required":
+                  - "armed"
+                "properties":
+                  "armed":
+                    "const": true
+                    "type": "boolean"
+                "additionalProperties": false
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/UnprocessableEntity"
   /control/v1/access-tokens:
     x-astrlink-implementation-status: implemented
     get:
@@ -1580,42 +1853,77 @@ paths:
     x-astrlink-implementation-status: implemented
     parameters:
       - $ref: "#/components/parameters/AccessTokenId"
-    patch:
-      x-astrlink-role: operator
-      tags: [Access Tokens]
-      operationId: updateAccessToken
-      summary: Rename a local inference access token and replace the API providers it may use.
-      description: |
-        The token value stays the same, so clients keep working. A changed
-        provider scope applies to the next request made with the token.
-      requestBody:
-        required: true
-        content:
-          application/merge-patch+json:
-            schema:
-              $ref: "#/components/schemas/AccessTokenUpdate"
-      responses:
+    "get":
+      "x-astrlink-role": "observer"
+      "tags":
+        - "Access Tokens"
+      "operationId": "getAccessToken"
+      "summary": "Read access-token metadata and routing ETag."
+      "responses":
         "200":
-          description: The updated token metadata.
-          headers:
-            Cache-Control:
-              $ref: "#/components/headers/NoStore"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AccessToken"
+          "description": "Token metadata."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/AccessToken"
+          "headers":
+            "ETag":
+              "$ref": "#/components/headers/ETag"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          "$ref": "#/components/responses/BadRequest"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          "$ref": "#/components/responses/Unauthorized"
         "404":
-          $ref: "#/components/responses/NotFound"
+          "$ref": "#/components/responses/NotFound"
         "409":
-          $ref: "#/components/responses/Conflict"
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/UnprocessableEntity"
+    "patch":
+      "x-astrlink-role": "operator"
+      "tags":
+        - "Access Tokens"
+      "operationId": "updateAccessToken"
+      "summary": "Update the token name and allowed providers, or rebind its routing scope with If-Match."
+      "parameters":
+        - in: header
+          name: If-Match
+          description: Required for a routing scope change.
+          schema: { type: string }
+      "requestBody":
+        "required": true
+        "content":
+          "application/merge-patch+json":
+            "schema":
+              oneOf:
+                - $ref: "#/components/schemas/AccessTokenUpdate"
+                - $ref: "#/components/schemas/AccessTokenRouting"
+      "responses":
+        "200":
+          "description": "Token metadata."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/AccessToken"
+          "headers":
+            "ETag":
+              "$ref": "#/components/headers/ETag"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "412":
+          "$ref": "#/components/responses/PreconditionFailed"
         "415":
           description: Content-Type must be application/merge-patch+json.
         "422":
-          $ref: "#/components/responses/UnprocessableEntity"
+          "$ref": "#/components/responses/UnprocessableEntity"
+        "428":
+          "$ref": "#/components/responses/PreconditionRequired"
     delete:
       x-astrlink-role: operator
       tags: [Access Tokens]
@@ -4068,6 +4376,15 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
+    PreconditionRequired:
+      description: A strong If-Match header is required for this operation.
+      headers:
+        Cache-Control:
+          $ref: "#/components/headers/NoStore"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
     PreconditionFailed:
       description: If-Match does not match the current resource representation.
       headers:
@@ -4825,8 +5142,29 @@ components:
                 $ref: "#/components/schemas/ServicePerformance"
     AccessToken:
       type: object
-      required: [id, name, hint, source, created_at, service_scope, service_ids]
+      required:
+        [
+          id,
+          name,
+          hint,
+          source,
+          created_at,
+          service_scope,
+          service_ids,
+          routing_scope,
+          etag,
+        ]
       properties:
+        "routing_scope":
+          "type": "string"
+          "enum":
+            - "global"
+            - "pool"
+        "pool_id":
+          "$ref": "./protocol-capabilities.schema.json#/$defs/ResourceId"
+        "etag":
+          "type": "string"
+          "pattern": "^\"[^\"\\r\\n]+\"$"
         id:
           $ref: ./protocol-capabilities.schema.json#/$defs/ResourceId
         name:
@@ -4859,6 +5197,18 @@ components:
             The API providers a selected token may use; empty for all. It may
             list providers deleted since, which match nothing.
       additionalProperties: false
+      "allOf":
+        - "if":
+            "properties":
+              "routing_scope":
+                "const": "pool"
+          "then":
+            "required":
+              - "pool_id"
+          "else":
+            "not":
+              "required":
+                - "pool_id"
     AccessTokenServiceScope:
       type: string
       enum: [all, selected]
@@ -4867,14 +5217,16 @@ components:
         added later. selected: only the providers in service_ids. A request
         outside the scope fails with HTTP 403 and error code
         access_token_scope.
-    AccessTokenCreate:
-      type: object
-      required: [name]
-      properties:
-        name:
-          type: string
-          minLength: 1
-          maxLength: 64
+    "AccessTokenCreate":
+      "type": "object"
+      "required":
+        - "name"
+        - "routing_scope"
+      "properties":
+        "name":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 64
         service_scope:
           $ref: "#/components/schemas/AccessTokenServiceScope"
         service_ids:
@@ -4884,7 +5236,26 @@ components:
           items:
             $ref: ./protocol-capabilities.schema.json#/$defs/ResourceId
           description: Required and non-empty when service_scope is selected; every ID must name an existing API provider.
-      additionalProperties: false
+        "routing_scope":
+          "type": "string"
+          "enum":
+            - "global"
+            - "pool"
+        "pool_id":
+          "$ref": "./protocol-capabilities.schema.json#/$defs/ResourceId"
+      "additionalProperties": false
+      "allOf":
+        - "if":
+            "properties":
+              "routing_scope":
+                "const": "pool"
+          "then":
+            "required":
+              - "pool_id"
+          "else":
+            "not":
+              "required":
+                - "pool_id"
     AccessTokenUpdate:
       type: object
       required: [name, service_scope, service_ids]
@@ -4903,6 +5274,306 @@ components:
             $ref: ./protocol-capabilities.schema.json#/$defs/ResourceId
           description: Empty for all; non-empty for selected, naming existing API providers.
       additionalProperties: false
+    "AccessTokenRouting":
+      "type": "object"
+      "required":
+        - "routing_scope"
+      "properties":
+        "routing_scope":
+          "type": "string"
+          "enum":
+            - "global"
+            - "pool"
+        "pool_id":
+          "$ref": "./protocol-capabilities.schema.json#/$defs/ResourceId"
+      "additionalProperties": false
+      "allOf":
+        - "if":
+            "properties":
+              "routing_scope":
+                "const": "pool"
+          "then":
+            "required":
+              - "pool_id"
+          "else":
+            "not":
+              "required":
+                - "pool_id"
+    "AccountPoolQueue":
+      "type": "object"
+      "required":
+        - "max_waiting_requests"
+        - "timeout_ms"
+      "properties":
+        "max_waiting_requests":
+          "type": "integer"
+          "minimum": 0
+          "maximum": 128
+          "default": 32
+        "timeout_ms":
+          "type": "integer"
+          "minimum": 100
+          "maximum": 60000
+          "default": 5000
+      "additionalProperties": false
+    "AccountPoolMemberInput":
+      "type": "object"
+      "required":
+        - "service_id"
+        - "enabled"
+        - "max_concurrent_requests"
+      "properties":
+        "service_id":
+          "$ref": "./protocol-capabilities.schema.json#/$defs/ResourceId"
+        "enabled":
+          "type": "boolean"
+        "max_concurrent_requests":
+          "type": "integer"
+          "minimum": 1
+          "maximum": 1024
+      "additionalProperties": false
+    "AccountPoolMember":
+      "type": "object"
+      "required":
+        - "pool_id"
+        - "service_id"
+        - "enabled"
+        - "max_concurrent_requests"
+      "properties":
+        "pool_id":
+          "$ref": "./protocol-capabilities.schema.json#/$defs/ResourceId"
+        "service_id":
+          "$ref": "./protocol-capabilities.schema.json#/$defs/ResourceId"
+        "enabled":
+          "type": "boolean"
+        "max_concurrent_requests":
+          "type": "integer"
+          "minimum": 1
+          "maximum": 1024
+      "additionalProperties": false
+    "AccountPoolCreate":
+      "type": "object"
+      "required":
+        - "name"
+        - "provider"
+      "properties":
+        "name":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 128
+        "provider":
+          "type": "string"
+          "enum":
+            - "openai_codex"
+            - "claude_code"
+            - "xai_grok"
+            - "antigravity"
+            - "github_copilot"
+            - "factory_droid"
+            - "kiro"
+        "enabled":
+          "type": "boolean"
+        "sticky":
+          "$ref": "#/components/schemas/ChannelStickiness"
+        "queue":
+          "$ref": "#/components/schemas/AccountPoolQueue"
+        "proxy":
+          "oneOf":
+            - "$ref": "#/components/schemas/ServiceProxyInput"
+            - "type": "null"
+      "additionalProperties": false
+      "description": "Creates an enabled pool by default. Defaults to session affinity for 3600 seconds, at most 32 waiting requests and a 5000 ms queue timeout. Provider is immutable. Claude supports direct HTTP accounts only; official CLI accounts are rejected."
+    "AccountPoolPatch":
+      "type": "object"
+      "required": []
+      "properties":
+        "name":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 128
+        "enabled":
+          "type": "boolean"
+        "sticky":
+          "$ref": "#/components/schemas/ChannelStickiness"
+        "queue":
+          "$ref": "#/components/schemas/AccountPoolQueue"
+        "proxy":
+          "oneOf":
+            - "$ref": "#/components/schemas/ServiceProxyInput"
+            - "type": "null"
+      "additionalProperties": false
+    "AccountQuotaCooldown":
+      "type": "object"
+      "required":
+        - "service_id"
+        - "observed_at"
+        - "source"
+        - "windows"
+      "properties":
+        "service_id":
+          "$ref": "./protocol-capabilities.schema.json#/$defs/ResourceId"
+        "observed_at":
+          "type": "string"
+          "format": "date-time"
+        "source":
+          "type": "string"
+          "enum":
+            - "usage"
+            - "upstream"
+        "windows":
+          "type": "array"
+          "minItems": 1
+          "maxItems": 32
+          "items":
+            "type": "object"
+            "required":
+              - "id"
+            "properties":
+              "id":
+                "type": "string"
+                "minLength": 1
+                "maxLength": 128
+              "limit_window_seconds":
+                "type": "integer"
+                "minimum": 1
+              "reset_at":
+                "type": "string"
+                "format": "date-time"
+            "additionalProperties": false
+      "additionalProperties": false
+    "PoolMemberStatus":
+      "type": "object"
+      "required":
+        - "service_id"
+        - "state"
+        - "active_requests"
+        - "proxy_source"
+      "properties":
+        "usage_observed_at":
+          type: string
+          format: date-time
+        "service_id":
+          "$ref": "./protocol-capabilities.schema.json#/$defs/ResourceId"
+        "state":
+          "type": "string"
+          "enum":
+            - "ready"
+            - "disabled"
+            - "disconnected"
+            - "paused"
+            - "quota_cooldown"
+            - "unknown"
+        "active_requests":
+          "type": "integer"
+          "minimum": 0
+        "proxy_source":
+          "type": "string"
+          "enum":
+            - "global"
+            - "pool"
+            - "account"
+        "quota_cooldown":
+          "$ref": "#/components/schemas/AccountQuotaCooldown"
+      "additionalProperties": false
+    "AccountPoolRuntime":
+      "type": "object"
+      "required":
+        - "active_requests"
+        - "waiting_requests"
+        - "available_accounts"
+        - "members"
+      "properties":
+        "active_requests":
+          "type": "integer"
+          "minimum": 0
+        "waiting_requests":
+          "type": "integer"
+          "minimum": 0
+        "available_accounts":
+          "type": "integer"
+          "minimum": 0
+        "members":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/PoolMemberStatus"
+      "additionalProperties": false
+    "AccountPool":
+      "type": "object"
+      "required":
+        - "id"
+        - "name"
+        - "provider"
+        - "enabled"
+        - "sticky"
+        - "queue"
+        - "members"
+        - "created_at"
+        - "updated_at"
+        - "etag"
+        - "runtime"
+      "properties":
+        "id":
+          "$ref": "./protocol-capabilities.schema.json#/$defs/ResourceId"
+        "name":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 128
+        "provider":
+          "type": "string"
+          "enum":
+            - "openai_codex"
+            - "claude_code"
+            - "xai_grok"
+            - "antigravity"
+            - "github_copilot"
+            - "factory_droid"
+            - "kiro"
+        "enabled":
+          "type": "boolean"
+        "sticky":
+          "$ref": "#/components/schemas/ChannelStickiness"
+        "queue":
+          "$ref": "#/components/schemas/AccountPoolQueue"
+        "proxy":
+          "$ref": "#/components/schemas/ServiceProxy"
+        "members":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/AccountPoolMember"
+        "created_at":
+          "type": "string"
+          "format": "date-time"
+        "updated_at":
+          "type": "string"
+          "format": "date-time"
+        "etag":
+          "type": "string"
+          "pattern": "^\"[^\"\\r\\n]+\"$"
+        "runtime":
+          "$ref": "#/components/schemas/AccountPoolRuntime"
+      "additionalProperties": false
+    "PoolRoutingDecision":
+      "type": "object"
+      "required":
+        - "id"
+        - "name"
+        - "routing_scope"
+        - "wait_ms"
+      "properties":
+        "id":
+          "$ref": "./protocol-capabilities.schema.json#/$defs/ResourceId"
+        "name":
+          "type": "string"
+          "maxLength": 128
+        "routing_scope":
+          "type": "string"
+          "enum":
+            - "global"
+            - "pool"
+        "wait_ms":
+          "type": "integer"
+          "minimum": 0
+      "additionalProperties": false
     AccessTokenSecret:
       type: object
       required: [token, access_token]
@@ -5084,6 +5755,8 @@ components:
       type: object
       required: [session_id, local_access_token_id, protocol, model]
       properties:
+        pool_id:
+          $ref: ./protocol-capabilities.schema.json#/$defs/ResourceId
         session_id: { type: string }
         local_access_token_id: { type: string }
         protocol: { type: string }
@@ -7829,6 +8502,8 @@ components:
       required: [skipped]
       description: Why routing chose service_id for this attempt. Omitted for historical records, model discovery, requests still waiting for a provider, and resolvers that cannot rank providers.
       properties:
+        pool:
+          $ref: "#/components/schemas/PoolRoutingDecision"
         selected:
           $ref: "#/components/schemas/RoutingSelection"
         skipped:
@@ -7842,6 +8517,7 @@ components:
       enum:
         [
           priority,
+          pool_balance,
           session_binding,
           response_affinity,
           websocket_connection,
@@ -7852,6 +8528,7 @@ components:
       description: |
         Why the attempt used service_id. Absent when no provider could be selected.
         priority: first eligible provider in the configured order.
+        pool_balance: lowest occupied-capacity ratio within the bound pool, with rotation for ties.
         session_binding: channel stickiness promoted the provider that last served this session.
         response_affinity: the provider that produced previous_response_id.
         websocket_connection: the provider the Responses WebSocket connection is bound to.

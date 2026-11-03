@@ -18,17 +18,20 @@
 package sync
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/QuantumNous/astrlink/core/contract"
 	"reflect"
 	"sort"
 	"time"
 )
 
 // PackageVersion is the newest payload version this build writes and reads.
-// Version 2 protects access tokens from version 1 writers, which drop unknown
-// entity kinds. The encrypted envelope's format is unchanged.
-const PackageVersion = 2
+// Version 3 protects pools and explicit token scopes from older writers.
+// Versions 1 and 2 only carried global tokens; their read upgrade is explicit.
+// The encrypted envelope's format is unchanged.
+const PackageVersion = 3
 
 const legacyPackageVersion = 1
 
@@ -57,14 +60,18 @@ const (
 	KindPolicy                 = "policy"
 	KindPricingConfig          = "pricing_config"
 	KindAccessToken            = "access_token"
+	KindAccountPool            = "account_pool"
+	KindPoolProxyCredential    = "pool_proxy_credential"
 )
 
 // Kinds is every kind a package carries, in a stable order.
 func Kinds() []string {
 	return []string{
 		KindService,
+		KindAccountPool,
 		KindServiceCredential,
 		KindServiceProxyCredential,
+		KindPoolProxyCredential,
 		KindBuiltinToolCredential,
 		KindPolicy,
 		KindPricingConfig,
@@ -74,7 +81,7 @@ func Kinds() []string {
 
 // CredentialKinds are the kinds whose Entity carries Secret.
 func CredentialKinds() []string {
-	return []string{KindServiceCredential, KindServiceProxyCredential, KindBuiltinToolCredential}
+	return []string{KindServiceCredential, KindServiceProxyCredential, KindPoolProxyCredential, KindBuiltinToolCredential}
 }
 
 // IsCredentialKind reports whether a kind carries a sealed value rather than a
@@ -168,11 +175,43 @@ func Decode(encoded []byte) (Document, error) {
 	if err := json.Unmarshal(encoded, &document); err != nil {
 		return Document{}, fmt.Errorf("sync package is not readable: %w", err)
 	}
-	if document.Version != legacyPackageVersion && document.Version != PackageVersion {
+	if document.Version != legacyPackageVersion && document.Version != 2 && document.Version != PackageVersion {
 		return Document{}, fmt.Errorf("sync package version %d is unsupported", document.Version)
 	}
 	if document.Entities == nil {
 		document.Entities = map[string]map[string]Entity{}
+	}
+	for id, entity := range document.Entities[KindAccessToken] {
+		if entity.Deleted {
+			continue
+		}
+		decoder := json.NewDecoder(bytes.NewReader(entity.Document))
+		decoder.DisallowUnknownFields()
+		var token contract.AccessTokenDocument
+		if err := decoder.Decode(&token); err != nil {
+			return Document{}, fmt.Errorf("invalid synced access token %s: %w", id, err)
+		}
+		if document.Version < PackageVersion {
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(entity.Document, &fields); err != nil {
+				return Document{}, err
+			}
+			if fields["routing_scope"] != nil || fields["pool_id"] != nil {
+				return Document{}, fmt.Errorf("scoped access tokens require sync version 3")
+			}
+			token.RoutingScope = contract.RoutingScopeGlobal
+		} else if err := token.AccessTokenRouting.Validate(); err != nil {
+			return Document{}, fmt.Errorf("invalid synced token scope: %w", err)
+		}
+		var err error
+		entity.Document, err = json.Marshal(token)
+		if err != nil {
+			return Document{}, err
+		}
+		document.Entities[KindAccessToken][id] = entity
+	}
+	if document.Version < PackageVersion && (len(document.Entities[KindAccountPool]) > 0 || len(document.Entities[KindPoolProxyCredential]) > 0) {
+		return Document{}, fmt.Errorf("account pools require sync version 3")
 	}
 	return document, nil
 }

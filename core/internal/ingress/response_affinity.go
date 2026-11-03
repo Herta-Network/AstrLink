@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/QuantumNous/astrlink/core/contract"
+	"github.com/QuantumNous/astrlink/core/internal/accountpool"
 	"github.com/QuantumNous/astrlink/core/internal/endpoint"
 	"github.com/QuantumNous/astrlink/core/internal/storage"
 	"sync"
@@ -37,6 +38,9 @@ func (handler *Handler) rememberResponseAffinity(ctx context.Context, session *r
 		model = session.classified.routingModel()
 	}
 	binding := storage.ResponseAffinity{ServiceID: candidate.CanonicalService().ID, UpstreamModel: model, UpstreamProtocol: plan.ProcessingProtocol(), PlanType: plan.Type}
+	if pool := poolForRequest(ctx); pool != nil {
+		binding.PoolID = pool.Pool.ID
+	}
 	key := affinityKey{string(principal), session.outputResponseID}
 	handler.affinities.mu.Lock()
 	if handler.affinities.entries == nil {
@@ -89,6 +93,13 @@ func (handler *Handler) bindResponseAffinity(ctx context.Context, request Reques
 		}
 	}
 	var selected *endpoint.Resolved
+	var currentPool contract.AccountPoolID
+	if pool := poolForRequest(ctx); pool != nil {
+		currentPool = pool.Pool.ID
+	}
+	if found && binding.PoolID != currentPool {
+		return nil, accountpool.ErrScope
+	}
 	if found {
 		for _, candidate := range candidates {
 			model := candidate.UpstreamModel

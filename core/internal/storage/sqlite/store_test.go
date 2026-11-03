@@ -390,7 +390,7 @@ func TestAccessTokenCreateListRevealAuthenticateAndDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	created, err := manager.Create(ctx, "  CI Agent  ")
+	created, err := manager.Create(ctx, "  CI Agent  ", contract.AccessTokenRouting{RoutingScope: contract.RoutingScopeGlobal})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -435,13 +435,13 @@ func TestAccessTokenCreateListRevealAuthenticateAndDelete(t *testing.T) {
 	if id, err := manager.Authenticate(ctx, created.Value); err != nil || id != created.Token.ID {
 		t.Fatalf("Authenticate = %q, %v", id, err)
 	}
-	if _, err := manager.Create(ctx, "ci agent"); !errors.Is(err, accesstoken.ErrConflict) {
+	if _, err := manager.Create(ctx, "ci agent", contract.AccessTokenRouting{RoutingScope: contract.RoutingScopeGlobal}); !errors.Is(err, accesstoken.ErrConflict) {
 		t.Fatalf("case-insensitive duplicate error = %v", err)
 	}
-	if _, err := manager.Create(ctx, "Σ Agent"); err != nil {
+	if _, err := manager.Create(ctx, "Σ Agent", contract.AccessTokenRouting{RoutingScope: contract.RoutingScopeGlobal}); err != nil {
 		t.Fatalf("Create Unicode case-fold token: %v", err)
 	}
-	if _, err := manager.Create(ctx, "ς agent"); !errors.Is(err, accesstoken.ErrConflict) {
+	if _, err := manager.Create(ctx, "ς agent", contract.AccessTokenRouting{RoutingScope: contract.RoutingScopeGlobal}); !errors.Is(err, accesstoken.ErrConflict) {
 		t.Fatalf("Unicode case-insensitive duplicate error = %v", err)
 	}
 	if err := manager.Delete(ctx, created.Token.ID); err != nil {
@@ -465,11 +465,11 @@ func TestAccessTokenLimitIsEnforcedAtomically(t *testing.T) {
 	ctx := context.Background()
 	// The automatically created default consumes one of the 100 slots.
 	for index := 1; index < storagecontract.AccessTokenLimit; index++ {
-		if _, err := manager.Create(ctx, fmt.Sprintf("client-%03d", index)); err != nil {
+		if _, err := manager.Create(ctx, fmt.Sprintf("client-%03d", index), contract.AccessTokenRouting{RoutingScope: contract.RoutingScopeGlobal}); err != nil {
 			t.Fatalf("Create %d: %v", index, err)
 		}
 	}
-	if _, err := manager.Create(ctx, "one-too-many"); !errors.Is(err, accesstoken.ErrTokenLimit) {
+	if _, err := manager.Create(ctx, "one-too-many", contract.AccessTokenRouting{RoutingScope: contract.RoutingScopeGlobal}); !errors.Is(err, accesstoken.ErrTokenLimit) {
 		t.Fatalf("limit error = %v", err)
 	}
 	var count int
@@ -518,7 +518,7 @@ func TestAccessTokenCreateWaitsForAnotherWriter(t *testing.T) {
 	}()
 	ctx := context.Background()
 	for index := 0; index < 50; index++ {
-		if _, err := manager.Create(ctx, fmt.Sprintf("busy-%02d", index)); err != nil {
+		if _, err := manager.Create(ctx, fmt.Sprintf("busy-%02d", index), contract.AccessTokenRouting{RoutingScope: contract.RoutingScopeGlobal}); err != nil {
 			close(stop)
 			<-writerDone
 			t.Fatalf("Create %d while another connection writes: %v", index, err)
@@ -641,7 +641,7 @@ func TestAccessTokenAuthenticationFailsClosedForCorruptStoredRecords(t *testing.
 			if err != nil {
 				t.Fatal(err)
 			}
-			created, err := manager.Create(context.Background(), "corruption target")
+			created, err := manager.Create(context.Background(), "corruption target", contract.AccessTokenRouting{RoutingScope: contract.RoutingScopeGlobal})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -713,7 +713,7 @@ func TestAccessTokenRevealFailsClosedForCorruptStoredSecrets(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			created, err := manager.Create(context.Background(), "corruption target")
+			created, err := manager.Create(context.Background(), "corruption target", contract.AccessTokenRouting{RoutingScope: contract.RoutingScopeGlobal})
 			if err != nil {
 				t.Fatal(err)
 			}

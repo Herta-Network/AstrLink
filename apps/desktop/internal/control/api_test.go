@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/QuantumNous/astrlink/core/contract"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -383,17 +384,23 @@ func (b *bridge) cases() []bridgeCase {
 		{name: "local_data_status", call: func(ctx context.Context) (any, error) { return a.LocalDataStatus(ctx) },
 			method: get, path: "/control/v1/local-data", timeout: short, limit: normal, reply: `{"undecryptable":0}`},
 
+		{name: "replace_account_pool_members", call: func(ctx context.Context) (any, error) {
+			return s.ReplaceAccountPoolMembers(ctx, "pool_a", strongTag, raw(`[{"service_id":"service_a","enabled":true,"max_concurrent_requests":2}]`))
+		}, method: put, path: "/control/v1/account-pools/pool_a/members", body: `{"members":[{"service_id":"service_a","enabled":true,"max_concurrent_requests":2}]}`, ifMatch: strongTag, timeout: short, limit: normal, reply: `{"id":"pool_a"}`},
+		{name: "update_access_token_routing", call: func(ctx context.Context) (any, error) {
+			return tk.UpdateAccessTokenRouting(ctx, "token_a", strongTag, raw(`{"routing_scope":"pool","pool_id":"pool_a"}`))
+		}, method: patch, path: "/control/v1/access-tokens/token_a", ifMatch: strongTag, body: `{"routing_scope":"pool","pool_id":"pool_a"}`, timeout: short, limit: normal, reply: `{"id":"token_a"}`},
 		{name: "list_access_tokens", call: func(ctx context.Context) (any, error) { return tk.ListAccessTokens(ctx) },
 			method: get, path: "/control/v1/access-tokens", timeout: short, limit: normal, reply: `{"items":[]}`},
 		{name: "list_network_addresses", call: func(ctx context.Context) (any, error) { return tk.ListNetworkAddresses(ctx) },
 			method: get, path: "/control/v1/network-addresses", timeout: short, limit: normal, reply: `{"items":[]}`},
 		{name: "create_access_token scoped", call: func(ctx context.Context) (any, error) {
-			return tk.CreateAccessToken(ctx, "laptop", ptr("selected"), nil)
-		}, method: post, path: "/control/v1/access-tokens", body: `{"name":"laptop","service_scope":"selected","service_ids":[]}`,
+			return tk.CreateAccessToken(ctx, "laptop", contract.AccessTokenRouting{RoutingScope: contract.RoutingScopeGlobal}, ptr("selected"), nil)
+		}, method: post, path: "/control/v1/access-tokens", body: `{"routing_scope":"global","name":"laptop","service_scope":"selected","service_ids":[]}`,
 			timeout: short, limit: normal, status: http.StatusCreated, reply: `{"id":"token_a"}`},
 		{name: "create_access_token", call: func(ctx context.Context) (any, error) {
-			return tk.CreateAccessToken(ctx, "laptop", nil, []string{"service_a"})
-		}, method: post, path: "/control/v1/access-tokens", body: `{"name":"laptop"}`,
+			return tk.CreateAccessToken(ctx, "laptop", contract.AccessTokenRouting{RoutingScope: contract.RoutingScopeGlobal}, nil, []string{"service_a"})
+		}, method: post, path: "/control/v1/access-tokens", body: `{"routing_scope":"global","name":"laptop"}`,
 			timeout: short, limit: normal, status: http.StatusCreated, reply: `{"id":"token_a"}`},
 		{name: "update_access_token", call: func(ctx context.Context) (any, error) {
 			return tk.UpdateAccessToken(ctx, "token_a", "desk", "all", nil)
