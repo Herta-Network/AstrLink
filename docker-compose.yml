@@ -1,8 +1,22 @@
+# Deploy or update this checkout with: ./scripts/deploy.sh
+# Manual local build: docker compose up -d --build
+# Optionally stamp it with: ASTRLINK_COMMIT=$(git rev-parse HEAD) docker compose up -d --build
 services:
   astrlink:
-    image: calciumion/astrlink:latest
+    image: astrlink:local
+    pull_policy: build
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        ASTRLINK_COMMIT: "${ASTRLINK_COMMIT:-unknown}"
+    environment:
+      ASTRLINK_DATA_DIR: /data
+      ASTRLINK_LISTEN: "0.0.0.0:8317"
     ports:
-      - "8317:8317"
+      # Use the host's HTTPS proxy or an SSH tunnel for first-run setup.
+      # Set ASTRLINK_BIND_ADDRESS=0.0.0.0 to expose the port directly.
+      - "${ASTRLINK_BIND_ADDRESS:-127.0.0.1}:${ASTRLINK_PORT:-8317}:8317"
     volumes:
       - astrlink-data:/data
     restart: unless-stopped
