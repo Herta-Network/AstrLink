@@ -19,8 +19,8 @@ func TestNetworkProductionRequiresTheSameDependenciesAndNoHostPin(t *testing.T) 
 			return endpoint.Resolved{}, endpoint.ErrNoEndpoint
 		}),
 		Authorizer: authorizerFunc(func(context.Context, contract.Endpoint) (http.Header, error) { return nil, nil }),
-		AccessTokenAuthenticator: AccessTokenAuthenticatorFunc(func(context.Context, string) (contract.AccessTokenID, error) {
-			return "", errors.New("not found")
+		AccessTokenAuthenticator: AccessTokenAuthenticatorFunc(func(context.Context, string) (AuthenticatedAccessToken, error) {
+			return AuthenticatedAccessToken{}, errors.New("not found")
 		}),
 	}
 	if _, err := NewNetworkProduction(complete); err != nil {
@@ -55,11 +55,11 @@ func TestNetworkProductionAcceptsAnyHostAndOriginButRequiresToken(t *testing.T) 
 		Authorizer: authorizerFunc(func(context.Context, contract.Endpoint) (http.Header, error) {
 			return nil, errors.New("authorizer must not run without an endpoint")
 		}),
-		AccessTokenAuthenticator: AccessTokenAuthenticatorFunc(func(_ context.Context, presented string) (contract.AccessTokenID, error) {
+		AccessTokenAuthenticator: AccessTokenAuthenticatorFunc(func(_ context.Context, presented string) (AuthenticatedAccessToken, error) {
 			if presented == token {
-				return "token_primary", nil
+				return testAccessTokenPrincipal("token_primary"), nil
 			}
-			return "", errors.New("not found")
+			return AuthenticatedAccessToken{}, errors.New("not found")
 		}),
 		RequestRecords: store,
 	})
@@ -125,8 +125,8 @@ func TestNetworkProductionResponsesWebSocketAcceptsAuthenticatedOrigin(t *testin
 			return endpoint.Resolved{}, endpoint.ErrNoEndpoint
 		}),
 		Authorizer: authorizerFunc(func(context.Context, contract.Endpoint) (http.Header, error) { return nil, nil }),
-		AccessTokenAuthenticator: AccessTokenAuthenticatorFunc(func(context.Context, string) (contract.AccessTokenID, error) {
-			return "token_primary", nil
+		AccessTokenAuthenticator: AccessTokenAuthenticatorFunc(func(context.Context, string) (AuthenticatedAccessToken, error) {
+			return testAccessTokenPrincipal("token_primary"), nil
 		}),
 		RequestRecords: store,
 	})

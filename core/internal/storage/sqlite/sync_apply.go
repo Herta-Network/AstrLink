@@ -27,6 +27,8 @@ const (
 	syncKindPolicy                 = "policy"
 	syncKindPricingConfig          = "pricing_config"
 	syncKindAccessToken            = "access_token"
+	syncKindAccountPool            = "account_pool"
+	syncKindPoolProxyCredential    = "pool_proxy_credential"
 )
 
 // SyncWriteEntity writes one entity a merge chose, under its local id. A
@@ -39,8 +41,15 @@ const (
 // afterwards. A subscription account is the one thing a package cannot carry
 // at all: its status is this device's, so an account with no local token
 // arrives signed out, waiting for the user to sign in here.
-func (store *Store) SyncWriteEntity(ctx context.Context, kind, localID string, document []byte) error {
+func (store *Store) SyncWriteEntity(ctx context.Context, kind, localID string, document []byte) (err error) {
+	defer func() {
+		if err == nil {
+			store.notifyAccountPools()
+		}
+	}()
 	switch kind {
+	case syncKindAccountPool:
+		return store.syncWriteAccountPool(ctx, localID, document)
 	case syncKindService:
 		return store.syncWriteService(ctx, localID, document)
 	case syncKindPolicy:
@@ -55,8 +64,22 @@ func (store *Store) SyncWriteEntity(ctx context.Context, kind, localID string, d
 // SyncDeleteEntity removes one entity a merge chose is gone. Deleting a service
 // cascades to its credentials; the mappings and tombstones that named it are
 // the engine's business, not this method's.
-func (store *Store) SyncDeleteEntity(ctx context.Context, kind, localID string) error {
+func (store *Store) SyncDeleteEntity(ctx context.Context, kind, localID string) (err error) {
+	defer func() {
+		if err == nil {
+			store.notifyAccountPools()
+		}
+	}()
 	switch kind {
+	case syncKindAccountPool:
+		record, err := store.GetAccountPool(ctx, contract.AccountPoolID(localID))
+		if errors.Is(err, storage.ErrNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		return store.DeleteAccountPool(ctx, record.Pool.ID, record.ETag)
 	case syncKindService:
 		if _, err := store.db.ExecContext(ctx, `DELETE FROM services WHERE id = ?`, localID); err != nil {
 			return fmt.Errorf("delete synced service: %w", err)
@@ -217,9 +240,13 @@ func (store *Store) SyncBindCredentialRefs(ctx context.Context) (err error) {
 			return fmt.Errorf("rebind service credentials: %w", err)
 		}
 	}
+	if err = bindPoolCredentialRefs(ctx, transaction); err != nil {
+		return err
+	}
 	if err = transaction.Commit(); err != nil {
 		return fmt.Errorf("commit credential rebind: %w", err)
 	}
+	store.notifyAccountPools()
 	return nil
 }
 
@@ -555,6 +582,9 @@ func (store *Store) SyncWriteAccessToken(ctx context.Context, localID string, do
 	if err != nil {
 		return err
 	}
+	if err := synced.AccessTokenRouting.Validate(); err != nil {
+		return fmt.Errorf("%w: %v", storage.ErrInvalidArgument, err)
+	}
 	name, nameKey, err := normalizeAccessTokenName(synced.Name)
 	if err != nil {
 		return fmt.Errorf("%w: %v", storage.ErrInvalidArgument, err)
@@ -570,7 +600,7 @@ func (store *Store) SyncWriteAccessToken(ctx context.Context, localID string, do
 		createdAt = store.now().UTC()
 	}
 	hash := sha256.Sum256(value)
-	unchanged, err := store.accessTokenUnchanged(ctx, id, name, source, createdAt, value, hash)
+	unchanged, err := store.accessTokenUnchanged(ctx, id, name, source, createdAt, value, hash, synced.AccessTokenRouting)
 	if err != nil {
 		return err
 	}
@@ -583,6 +613,9 @@ func (store *Store) SyncWriteAccessToken(ctx context.Context, localID string, do
 		return fmt.Errorf("begin access token write: %w", err)
 	}
 	defer rollbackOnError(transaction, &err)
+	if err = validateTokenPool(ctx, transaction, synced.AccessTokenRouting); err != nil {
+		return fmt.Errorf("%w: synced token pool dependency is unavailable", storage.ErrConflict)
+	}
 	if name, nameKey, err = store.uniqueAccessTokenName(ctx, transaction, id, name); err != nil {
 		return err
 	}
@@ -595,13 +628,15 @@ func (store *Store) SyncWriteAccessToken(ctx context.Context, localID string, do
 		return fmt.Errorf("drop duplicate access token: %w", err)
 	}
 	if _, err = transaction.ExecContext(ctx, `INSERT INTO local_access_tokens
-    (id, name, name_key, token_hash, token_hint, source, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+    (id, name, name_key, token_hash, token_hint, source, created_at, routing_scope, pool_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
     name = excluded.name, name_key = excluded.name_key, token_hash = excluded.token_hash,
-    token_hint = excluded.token_hint, source = excluded.source, created_at = excluded.created_at`,
+    token_hint = excluded.token_hint, source = excluded.source, created_at = excluded.created_at,
+    routing_revision = CASE WHEN local_access_tokens.routing_scope <> excluded.routing_scope OR COALESCE(local_access_tokens.pool_id, '') <> COALESCE(excluded.pool_id, '') OR local_access_tokens.token_hash <> excluded.token_hash THEN local_access_tokens.routing_revision + 1 ELSE local_access_tokens.routing_revision END,
+    routing_scope = excluded.routing_scope, pool_id = excluded.pool_id`,
 		id, name, nameKey, hash[:], accessTokenHint(string(value)), string(source),
-		createdAt.Format(time.RFC3339Nano),
+		createdAt.Format(time.RFC3339Nano), synced.RoutingScope, sql.NullString{String: string(synced.PoolID), Valid: synced.PoolID != ""},
 	); err != nil {
 		return fmt.Errorf("write synced access token: %w", err)
 	}
@@ -619,6 +654,7 @@ ON CONFLICT(token_id) DO UPDATE SET token_value = excluded.token_value, sealed =
 	if err = transaction.Commit(); err != nil {
 		return fmt.Errorf("commit access token write: %w", err)
 	}
+	store.notifyAccountPools()
 	return nil
 }
 
@@ -633,18 +669,19 @@ func (store *Store) accessTokenUnchanged(
 	createdAt time.Time,
 	value []byte,
 	hash [sha256.Size]byte,
+	routing contract.AccessTokenRouting,
 ) (bool, error) {
-	var storedName, storedSource, storedCreatedAt string
+	var storedName, storedSource, storedCreatedAt, storedScope, storedPool string
 	var storedHash []byte
-	err := store.db.QueryRowContext(ctx, `SELECT name, source, created_at, token_hash
-FROM local_access_tokens WHERE id = ?`, id).Scan(&storedName, &storedSource, &storedCreatedAt, &storedHash)
+	err := store.db.QueryRowContext(ctx, `SELECT name, source, created_at, token_hash, routing_scope, COALESCE(pool_id, '')
+FROM local_access_tokens WHERE id = ?`, id).Scan(&storedName, &storedSource, &storedCreatedAt, &storedHash, &storedScope, &storedPool)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, fmt.Errorf("read stored access token: %w", err)
 	}
-	if storedName != name || storedSource != string(source) || !bytes.Equal(storedHash, hash[:]) {
+	if storedName != name || storedSource != string(source) || !bytes.Equal(storedHash, hash[:]) || storedScope != string(routing.RoutingScope) || storedPool != string(routing.PoolID) {
 		return false, nil
 	}
 	storedAt, err := time.Parse(time.RFC3339Nano, storedCreatedAt)

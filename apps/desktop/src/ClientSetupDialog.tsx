@@ -1,3 +1,4 @@
+import { getAccountPool } from "./bridge";
 import { isWebEdition } from "./edition";
 import { WebClientSetup } from "./WebClientSetup";
 import {
@@ -373,10 +374,28 @@ function DesktopClientSetupDialog({
     );
   }, [refresh]);
 
+  const loadScopedServices = useCallback(async () => {
+    const page = await listServices();
+    if (token.routing_scope === "global") return page;
+    if (!token.pool_id) throw new Error("Account pool binding is unavailable");
+    const pool = await getAccountPool(token.pool_id);
+    const members = new Set(
+      pool.enabled
+        ? pool.members
+            .filter((member) => member.enabled)
+            .map((member) => member.service_id)
+        : [],
+    );
+    return {
+      ...page,
+      items: page.items.filter((service) => members.has(service.id)),
+    };
+  }, [token.routing_scope, token.pool_id]);
+
   useEffect(() => {
     let cancelled = false;
     void Promise.allSettled([
-      listServices(),
+      loadScopedServices(),
       // Redirect sources are optional suggestions; any failure only drops them.
       Promise.resolve().then(() => getRoutingSettings()),
     ]).then(([services, routing]) => {
@@ -393,7 +412,7 @@ function DesktopClientSetupDialog({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadScopedServices]);
 
   // The place a card stands for: the chosen one, else where this token is
   // configured, else where it is installed.
@@ -718,7 +737,7 @@ function DesktopClientSetupDialog({
     if (entries.size > 0) {
       // The fresh patched records above also keep the marker correct if refresh fails.
       try {
-        const next = await listServices();
+        const next = await loadScopedServices();
         if (active.current)
           setCatalog((current) => ({ ...current, services: next.items }));
       } catch {

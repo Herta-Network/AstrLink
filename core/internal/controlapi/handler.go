@@ -15,6 +15,7 @@ import (
 
 	"github.com/QuantumNous/astrlink/core/contract"
 	"github.com/QuantumNous/astrlink/core/internal/accesstoken"
+	"github.com/QuantumNous/astrlink/core/internal/accountpool"
 	"github.com/QuantumNous/astrlink/core/internal/pricing"
 	"github.com/QuantumNous/astrlink/core/internal/privacy"
 	"github.com/QuantumNous/astrlink/core/internal/relaykitbridge"
@@ -43,6 +44,7 @@ const (
 )
 
 type Dependencies struct {
+	PoolRuntime        *accountpool.Runtime
 	BuiltinToolTester  BuiltinToolTester
 	PricingStore       PricingStore
 	PricingManager     *pricing.Manager
@@ -116,7 +118,9 @@ type CodingPlanUsage interface {
 
 type AccessTokenManager interface {
 	List(context.Context) ([]accesstoken.Token, error)
-	Create(context.Context, string) (accesstoken.CreatedToken, error)
+	Create(context.Context, string, contract.AccessTokenRouting) (accesstoken.CreatedToken, error)
+	Get(context.Context, contract.AccessTokenID) (accesstoken.Token, error)
+	UpdateRouting(context.Context, contract.AccessTokenID, contract.AccessTokenRouting, string) (accesstoken.Token, error)
 	Reveal(context.Context, contract.AccessTokenID) (string, error)
 	Delete(context.Context, contract.AccessTokenID) error
 }
@@ -136,6 +140,7 @@ type PrivacyModelRegistry interface {
 }
 
 type Handler struct {
+	poolRuntime       *accountpool.Runtime
 	builtinToolTester BuiltinToolTester
 	pricingStore      PricingStore
 	pricingManager    *pricing.Manager
@@ -216,6 +221,7 @@ func newHandler(version contract.VersionResponse, dependencies Dependencies) (*H
 	}
 	routingSettings, _ := dependencies.ServiceStore.(storage.RoutingSettingsStore)
 	handler := &Handler{
+		poolRuntime:       dependencies.PoolRuntime,
 		builtinToolTester: dependencies.BuiltinToolTester,
 		clientIdentities:  dependencies.ClientIdentities,
 		pricingStore:      dependencies.PricingStore, pricingManager: dependencies.PricingManager,
@@ -300,6 +306,14 @@ func newHandler(version contract.VersionResponse, dependencies Dependencies) (*H
 		handler.registerServiceRoutes()
 	}
 	handler.registerClaudeCLIRoutes()
+	for _, path := range []string{AccountPoolsPath, AccountPoolsPath + "/"} {
+		handler.mux.HandleFunc(path, handler.authenticatedBy(handler.accountPoolResource, func(request *http.Request) Role {
+			if isSafeMethod(request.Method) {
+				return RoleObserver
+			}
+			return RoleOperator
+		}))
+	}
 	handler.mux.HandleFunc(ServiceOrderPath, handler.authenticated(handler.serviceOrderResource, RoleObserver))
 	handler.mux.HandleFunc(ServicePackagesPath, handler.authenticated(handler.servicePackagesResource, RoleObserver))
 	handler.mux.HandleFunc(ServicePackagesPath+"/", handler.authenticated(handler.servicePackagesResource, RoleObserver))

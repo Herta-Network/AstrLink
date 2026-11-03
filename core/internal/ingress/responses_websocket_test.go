@@ -95,12 +95,12 @@ func TestResponsesWebSocketMultiTurnPrivacyModelRewriteAndAuthentication(t *test
 	candidate.UpstreamModel = "private-model"
 	handler := NewWithDependencies(Dependencies{
 		Resolver: candidateResolver{candidates: []endpoint.Resolved{candidate}},
-		AccessTokenAuthenticator: AccessTokenAuthenticatorFunc(func(_ context.Context, token string) (contract.AccessTokenID, error) {
+		AccessTokenAuthenticator: AccessTokenAuthenticatorFunc(func(_ context.Context, token string) (AuthenticatedAccessToken, error) {
 			authorizations.Add(1)
 			if token != "local-token" {
-				return "", errors.New("bad token")
+				return AuthenticatedAccessToken{}, errors.New("bad token")
 			}
-			return "token_test", nil
+			return testAccessTokenPrincipal("token_test"), nil
 		}),
 		PrivacyFilter: testPrivacyEngine(t, privacy.Policy{Enabled: true, Mode: privacy.ModeRegex, Action: privacy.ActionRedact, ResponseRestore: true}, nil),
 	})
@@ -177,11 +177,11 @@ func TestResponsesWebSocketRechecksSwitchAndTokenOnEveryTurn(t *testing.T) {
 					candidate.Service.ResponsesWebSocketEnabled = &enabled
 					return candidate, nil
 				}),
-				AccessTokenAuthenticator: AccessTokenAuthenticatorFunc(func(context.Context, string) (contract.AccessTokenID, error) {
+				AccessTokenAuthenticator: AccessTokenAuthenticatorFunc(func(context.Context, string) (AuthenticatedAccessToken, error) {
 					if revokeToken && disabled.Load() {
-						return "", errors.New("revoked")
+						return AuthenticatedAccessToken{}, errors.New("revoked")
 					}
-					return "token_test", nil
+					return testAccessTokenPrincipal("token_test"), nil
 				}),
 			})
 			client := dialResponses(t, handler, http.Header{"Authorization": {"Bearer local"}})
@@ -236,7 +236,9 @@ func TestResponsesWebSocketCancellationAndConcurrentCreate(t *testing.T) {
 }
 
 func TestResponsesWebSocketBoundaryBeforeUpgrade(t *testing.T) {
-	handler := NewWithDependencies(Dependencies{AccessTokenAuthenticator: AccessTokenAuthenticatorFunc(func(context.Context, string) (contract.AccessTokenID, error) { return "", errors.New("invalid") })})
+	handler := NewWithDependencies(Dependencies{AccessTokenAuthenticator: AccessTokenAuthenticatorFunc(func(context.Context, string) (AuthenticatedAccessToken, error) {
+		return AuthenticatedAccessToken{}, errors.New("invalid")
+	})})
 	server := httptest.NewServer(handler)
 	defer server.Close()
 	for _, header := range []http.Header{{}, {"Origin": {"https://untrusted.example"}}} {

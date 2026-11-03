@@ -357,9 +357,9 @@ func TestGatewayNeverRetriesOrChangesRouting(t *testing.T) {
 			store := gatewayStore(t)
 			deps := gatewayDependencies(t, store)
 			deps.Resolver = forbiddenRouting{t}
-			deps.AccessTokenAuthenticator = ingress.AccessTokenAuthenticatorFunc(func(context.Context, string) (contract.AccessTokenID, error) {
+			deps.AccessTokenAuthenticator = ingress.AccessTokenAuthenticatorFunc(func(context.Context, string) (ingress.AuthenticatedAccessToken, error) {
 				t.Error("internal test demanded an inference token")
-				return "", errors.New("unexpected authentication")
+				return ingress.AuthenticatedAccessToken{}, errors.New("unexpected authentication")
 			})
 			calls := 0
 			deps.Forwarder = transport.New(timingTransport(func(*http.Request) (*http.Response, error) {

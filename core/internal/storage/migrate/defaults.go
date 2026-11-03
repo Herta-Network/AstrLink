@@ -1309,6 +1309,7 @@ END`,
           FROM context_sets sets WHERE sets.project = OLD.project AND sets.client_type = OLD.client_type));
 END`,
 		}},
+		{Version: 58, Name: "account_pools", Statements: accountPoolStatements()},
 	}
 }
 

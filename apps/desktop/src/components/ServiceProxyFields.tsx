@@ -28,6 +28,9 @@ export function ServiceProxyFields({
   onTest,
   testTarget,
   testDisabled = false,
+  title,
+  inheritLabel,
+  inheritHint,
 }: {
   value: ProxyDraft;
   onChange: (value: ProxyDraft) => void;
@@ -35,6 +38,9 @@ export function ServiceProxyFields({
   onTest: () => Promise<ServiceProxyProbeResult>;
   testTarget: string;
   testDisabled?: boolean;
+  title?: string;
+  inheritLabel?: string;
+  inheritHint?: string;
 }) {
   const { t } = useTranslation();
   const [testing, setTesting] = useState(false);
@@ -82,7 +88,9 @@ export function ServiceProxyFields({
           ) : undefined
         }
       >
-        <h2 className="text-sm font-semibold">{t("serviceProxy.title")}</h2>
+        <h2 className="text-sm font-semibold">
+          {title ?? t("serviceProxy.title")}
+        </h2>
         {currentTest && (
           <FormMessage
             className="mt-2"
@@ -113,7 +121,9 @@ export function ServiceProxyFields({
             <SelectContent>
               {(["inherit", "custom", "direct"] as const).map((mode) => (
                 <SelectItem key={mode} value={mode}>
-                  {t(`serviceProxy.${mode}`)}
+                  {mode === "inherit" && inheritLabel
+                    ? inheritLabel
+                    : t(`serviceProxy.${mode}`)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -165,15 +175,17 @@ export function ServiceProxyFields({
           </>
         )}
         <p className="text-xs text-muted-foreground @[600px]:col-span-2">
-          {t(
-            value.mode === "custom"
-              ? hasCredential
-                ? "serviceProxy.savedHint"
-                : "serviceProxy.customHint"
-              : value.mode === "direct"
-                ? "serviceProxy.directHint"
-                : "serviceProxy.inheritHint",
-          )}
+          {value.mode === "inherit" && inheritHint
+            ? inheritHint
+            : t(
+                value.mode === "custom"
+                  ? hasCredential
+                    ? "serviceProxy.savedHint"
+                    : "serviceProxy.customHint"
+                  : value.mode === "direct"
+                    ? "serviceProxy.directHint"
+                    : "serviceProxy.inheritHint",
+              )}
         </p>
         {value.mode === "custom" && (
           <p className="text-xs text-muted-foreground @[600px]:col-span-2">

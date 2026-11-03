@@ -219,6 +219,8 @@ func (handler *Handler) writeStoreError(writer http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, storage.ErrNotFound):
 		writeError(writer, http.StatusNotFound, "not_found", "resource not found")
+	case errors.Is(err, storage.ErrPoolMembership):
+		writeError(writer, http.StatusConflict, "pool_membership_conflict", "remove the account from its pool before deleting it or changing its connection mode")
 	case errors.Is(err, storage.ErrConflict):
 		writeError(
 			writer,

@@ -1,6 +1,9 @@
 package contract
 
-import "fmt"
+import (
+	"fmt"
+	"unicode/utf8"
+)
 
 // MaxRoutingSkips bounds the passed-over providers kept on one record.
 const MaxRoutingSkips = 64
@@ -11,7 +14,8 @@ type RoutingSelection string
 const (
 	// RoutingSelectionPriority is the first eligible provider in the
 	// configured order.
-	RoutingSelectionPriority RoutingSelection = "priority"
+	RoutingSelectionPriority    RoutingSelection = "priority"
+	RoutingSelectionPoolBalance RoutingSelection = "pool_balance"
 	// RoutingSelectionSessionBinding is the provider channel stickiness
 	// preferred because it last served this session.
 	RoutingSelectionSessionBinding RoutingSelection = "session_binding"
@@ -35,7 +39,7 @@ const (
 
 func (selection RoutingSelection) Valid() bool {
 	switch selection {
-	case RoutingSelectionPriority, RoutingSelectionSessionBinding, RoutingSelectionResponseAffinity,
+	case RoutingSelectionPriority, RoutingSelectionPoolBalance, RoutingSelectionSessionBinding, RoutingSelectionResponseAffinity,
 		RoutingSelectionWebSocketConnection, RoutingSelectionFailover, RoutingSelectionClientPin,
 		RoutingSelectionClaudeCLI:
 		return true
@@ -90,11 +94,24 @@ type RoutingSkip struct {
 // provider when none was selected) that routing excluded; providers that were
 // tried and rejected appear as routed events instead.
 type RequestRoutingDecision struct {
-	Selected RoutingSelection `json:"selected,omitempty"`
-	Skipped  []RoutingSkip    `json:"skipped"`
+	Pool     *PoolRoutingDecision `json:"pool,omitempty"`
+	Selected RoutingSelection     `json:"selected,omitempty"`
+	Skipped  []RoutingSkip        `json:"skipped"`
+}
+
+type PoolRoutingDecision struct {
+	ID           AccountPoolID `json:"id"`
+	Name         string        `json:"name"`
+	RoutingScope RoutingScope  `json:"routing_scope"`
+	WaitMS       int64         `json:"wait_ms"`
 }
 
 func (decision RequestRoutingDecision) Validate() error {
+	if pool := decision.Pool; pool != nil {
+		if pool.ID.Validate() != nil || utf8.RuneCountInString(pool.Name) > 128 || pool.WaitMS < 0 || (pool.RoutingScope != RoutingScopePool && pool.RoutingScope != RoutingScopeGlobal) {
+			return fmt.Errorf("invalid pool routing decision")
+		}
+	}
 	if decision.Selected != "" && !decision.Selected.Valid() {
 		return fmt.Errorf("unknown routing_decision.selected %q", decision.Selected)
 	}

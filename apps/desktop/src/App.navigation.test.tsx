@@ -14,6 +14,7 @@ const bridgeMocks = vi.hoisted(() => ({
   builtinToolAction: vi.fn().mockResolvedValue({ configured: false }),
   cancelPrivacyModelInstallation: vi.fn(),
   createAccessToken: vi.fn(),
+  listAccountPools: vi.fn().mockResolvedValue([]),
   decideRawAccess: vi.fn(),
   createService: vi.fn(),
   deleteAccessToken: vi.fn(),
@@ -440,6 +441,8 @@ describe("App workspace navigation", () => {
     bridgeMocks.listAccessTokens.mockResolvedValue({
       items: [
         {
+          routing_scope: "global" as const,
+          etag: '"token-routing-v1"',
           id: "token_01",
           name: "VS Code",
           hint: "astr_…K8Q2",
@@ -858,6 +861,8 @@ describe("App workspace navigation", () => {
     bridgeMocks.listAccessTokens.mockResolvedValue({
       items: [
         {
+          routing_scope: "global" as const,
+          etag: '"token-routing-v1"',
           id: "access_token_bootstrap",
           name: "默认令牌",
           hint: "astr_…B00T",
@@ -895,6 +900,8 @@ describe("App workspace navigation", () => {
     bridgeMocks.listAccessTokens.mockResolvedValue({
       items: [
         {
+          routing_scope: "global" as const,
+          etag: '"token-routing-v1"',
           id: "token_laptop",
           name: "laptop",
           hint: "astr_…L4PT",
@@ -927,6 +934,8 @@ describe("App workspace navigation", () => {
       next_cursor: null,
     });
     const created = {
+      routing_scope: "global" as const,
+      etag: '"token-routing-v1"',
       id: "token_setup",
       name: "My assistant",
       hint: "astr_…setup",
@@ -954,7 +963,9 @@ describe("App workspace navigation", () => {
         new Event("submit", { bubbles: true, cancelable: true }),
       ),
     );
-    expect(bridgeMocks.createAccessToken).toHaveBeenCalledWith("My assistant");
+    expect(bridgeMocks.createAccessToken).toHaveBeenCalledWith("My assistant", {
+      routing_scope: "global",
+    });
     expect(workspaceHeading().textContent).toBe("开始使用 AstrLink");
     expect(
       container.querySelector('[aria-current="step"]')?.textContent,
@@ -1819,6 +1830,8 @@ describe("App workspace navigation", () => {
     let resolveOldList:
       | ((value: {
           items: Array<{
+            routing_scope: "global";
+            etag: string;
             id: string;
             name: string;
             hint: string;
@@ -1836,6 +1849,8 @@ describe("App workspace navigation", () => {
       .mockResolvedValue({
         items: [
           {
+            routing_scope: "global" as const,
+            etag: '"token-routing-v1"',
             id: "token_new",
             name: "New session token",
             hint: "astr_…NEW2",
@@ -1854,6 +1869,8 @@ describe("App workspace navigation", () => {
       resolveOldList?.({
         items: [
           {
+            routing_scope: "global" as const,
+            etag: '"token-routing-v1"',
             id: "token_old",
             name: "Old session token",
             hint: "astr_…OLD1",

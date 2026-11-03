@@ -502,6 +502,14 @@ func (handler *Handler) deleteService(writer http.ResponseWriter, request *http.
 		handler.writeStoreError(writer, storage.ErrPrecondition)
 		return
 	}
+	if guard, ok := handler.serviceStore.(storage.ServiceDeletionGuard); ok {
+		release, err := guard.GuardServiceDeletion(request.Context(), id, expectedETag)
+		if err != nil {
+			handler.writeStoreError(writer, err)
+			return
+		}
+		defer release()
+	}
 	if current.Service.Kind.IsSubscription() {
 		if handler.subscriptions == nil {
 			writeError(writer, http.StatusServiceUnavailable, "subscription_unavailable", "subscription services are unavailable")

@@ -315,7 +315,7 @@ func TestConsoleWrongPasswordsHitTheVaultBackoff(t *testing.T) {
 
 func TestConsoleSignInReachesOperatorControlAndSignOutEndsIt(t *testing.T) {
 	handler := newFixture(t, testPassword).console
-	createToken := call{method: http.MethodPost, path: controlapi.AccessTokensPath, body: `{"name":"laptop"}`, page: true}
+	createToken := call{method: http.MethodPost, path: controlapi.AccessTokensPath, body: `{"routing_scope":"global","name":"laptop"}`, page: true}
 	if response := createToken.do(handler); response.Code != http.StatusUnauthorized {
 		t.Fatalf("anonymous create = %d %s", response.Code, response.Body.String())
 	}
@@ -404,7 +404,7 @@ func TestConsoleWritesRequireTheConsoleHeader(t *testing.T) {
 	cookie := sessionFrom(t, login(handler, testPassword))
 	for _, value := range []string{"", "0", "true"} {
 		for _, request := range []call{
-			{method: http.MethodPost, path: controlapi.AccessTokensPath, body: `{"name":"x"}`},
+			{method: http.MethodPost, path: controlapi.AccessTokensPath, body: `{"routing_scope":"global","name":"x"}`},
 			{method: http.MethodPost, path: LoginPath, body: `{"password":"` + testPassword + `"}`},
 			{method: http.MethodPost, path: LogoutPath},
 		} {
@@ -428,7 +428,7 @@ func TestConsoleWritesRequireTheConsoleHeader(t *testing.T) {
 	}
 	// nginx's default proxy_pass sends its upstream address as Host, so Host
 	// and Origin differ; the header alone decides.
-	request := call{method: http.MethodPost, path: controlapi.AccessTokensPath, body: `{"name":"proxied"}`, cookie: cookie, page: true,
+	request := call{method: http.MethodPost, path: controlapi.AccessTokensPath, body: `{"routing_scope":"global","name":"proxied"}`, cookie: cookie, page: true,
 		header: map[string]string{"Origin": "https://astrlink.example.com"}}
 	if response := request.do(handler); response.Code != http.StatusCreated {
 		t.Fatalf("proxied write = %d %s", response.Code, response.Body.String())
@@ -458,7 +458,7 @@ func TestConsoleRefusesCORSPreflights(t *testing.T) {
 func TestConsoleIgnoresAccessTokensAsSessions(t *testing.T) {
 	handler := newFixture(t, testPassword).console
 	cookie := sessionFrom(t, login(handler, testPassword))
-	created := call{method: http.MethodPost, path: controlapi.AccessTokensPath, body: `{"name":"client"}`, cookie: cookie, page: true}.do(handler)
+	created := call{method: http.MethodPost, path: controlapi.AccessTokensPath, body: `{"routing_scope":"global","name":"client"}`, cookie: cookie, page: true}.do(handler)
 	var secret struct {
 		AccessToken string `json:"access_token"`
 	}

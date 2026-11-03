@@ -139,7 +139,7 @@ pass "setup started a session"
 expect 204 "$(request POST /console/v1/logout)" "sign out"
 expect 401 "$(request POST /console/v1/login '{"password":"wrong password"}')" "a wrong password is refused"
 login
-expect 201 "$(request POST /control/v1/access-tokens '{"name":"smoke test"}')" "create an access token"
+expect 201 "$(request POST /control/v1/access-tokens '{"name":"smoke test","routing_scope":"global"}')" "create an access token"
 token=$(json_field access_token)
 [ -n "$token" ] || fail "no access token in $(cat "$work/body")"
 expect 401 "$(request GET /v1/models)" "/v1/models without an access token is refused, session cookie or not"

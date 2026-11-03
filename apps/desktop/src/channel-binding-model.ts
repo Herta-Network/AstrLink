@@ -1,4 +1,5 @@
 export interface ChannelBindingScope {
+  pool_id?: string;
   session_id: string;
   local_access_token_id: string;
   protocol: string;
@@ -49,6 +50,7 @@ function date(value: unknown): string {
 }
 function scope(value: Record<string, unknown>): ChannelBindingScope {
   return {
+    ...(value.pool_id !== undefined ? { pool_id: text(value.pool_id) } : {}),
     session_id: text(value.session_id),
     local_access_token_id: text(value.local_access_token_id),
     protocol: text(value.protocol),

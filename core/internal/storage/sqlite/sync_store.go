@@ -446,7 +446,12 @@ func (store *Store) ExportCredential(ctx context.Context, table, key string) ([]
 // a new service id opens here because the sealing happens now, on this device.
 // The owning service must exist first: every credential table cascades from
 // the services table.
-func (store *Store) ImportCredential(ctx context.Context, table, key string, plaintext []byte) error {
+func (store *Store) ImportCredential(ctx context.Context, table, key string, plaintext []byte) (err error) {
+	defer func() {
+		if err == nil {
+			store.notifyAccountPools()
+		}
+	}()
 	if !syncExportableTable(table) {
 		return fmt.Errorf("%w: %s is not importable", storage.ErrInvalidArgument, table)
 	}
@@ -475,6 +480,9 @@ func (store *Store) ImportCredential(ctx context.Context, table, key string, pla
 	}
 	now := store.now().UTC().Format(time.RFC3339Nano)
 	args := []any{key, sealed, now}
+	if table == accountPoolProxyCredentialsTable {
+		args = []any{key, sealed}
+	}
 	if table == serviceCredentialsTable {
 		// service_credentials keeps both a created_at and an updated_at.
 		args = append(args, now)
@@ -490,6 +498,8 @@ func (store *Store) ImportCredential(ctx context.Context, table, key string, pla
 // carry one use.
 func syncImportStatement(table string) (string, error) {
 	switch table {
+	case accountPoolProxyCredentialsTable:
+		return `INSERT INTO account_pool_proxy_credentials(pool_id, credential_value, sealed) VALUES (?, ?, 1) ON CONFLICT(pool_id) DO UPDATE SET credential_value=excluded.credential_value, sealed=1`, nil
 	case serviceCredentialsTable:
 		return `INSERT INTO service_credentials (service_id, credential_value, created_at, updated_at, sealed)
 VALUES (?, ?, ?, ?, 1)
@@ -514,7 +524,7 @@ ON CONFLICT(service_id) DO UPDATE SET credential_value = excluded.credential_val
 // syncExportableTable names the credential tables a package may carry.
 func syncExportableTable(table string) bool {
 	switch table {
-	case serviceCredentialsTable, serviceProxyCredentialsTable, builtinToolCredentialsTable, subscriptionCredentialsTable:
+	case serviceCredentialsTable, serviceProxyCredentialsTable, accountPoolProxyCredentialsTable, builtinToolCredentialsTable, subscriptionCredentialsTable:
 		return true
 	default:
 		return false
@@ -523,6 +533,8 @@ func syncExportableTable(table string) bool {
 
 func syncTableKeyColumn(table string) string {
 	switch table {
+	case accountPoolProxyCredentialsTable:
+		return "pool_id"
 	case builtinToolCredentialsTable:
 		return "kind"
 	default:

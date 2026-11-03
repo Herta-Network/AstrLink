@@ -1,3 +1,4 @@
+import { AccountPoolManager } from "./AccountPoolManager";
 import { isWebEdition } from "./edition";
 import { ConsoleLogout } from "./ConsoleEntry";
 import { WebSettings } from "./WebSettings";
@@ -98,6 +99,7 @@ import {
 type WorkspacePage =
   | { kind: "overview" }
   | { kind: "tokens" }
+  | { kind: "pools" }
   | { kind: "safety"; view?: "models" | "overview" }
   | { kind: "records"; target?: RecordsTarget }
   | { kind: "routing" }
@@ -216,6 +218,7 @@ export function trayNavigationTarget(
       return { kind: "safety", view: "overview" };
     case "overview":
     case "tokens":
+    case "pools":
     case "safety":
     case "records":
     case "routing":
@@ -895,6 +898,12 @@ export default function App() {
                 onClick={() => navigate({ kind: "list" })}
               />
               <NavButton
+                active={page.kind === "pools"}
+                icon="server"
+                label={t("nav.pools")}
+                onClick={() => navigate({ kind: "pools" })}
+              />
+              <NavButton
                 active={page.kind === "tokens"}
                 icon="key"
                 label={t("nav.tokens")}
@@ -1026,6 +1035,7 @@ export default function App() {
                 "create",
                 "edit",
                 "tokens",
+                "pools",
                 "records",
                 "safety",
                 "routing",
@@ -1121,6 +1131,18 @@ export default function App() {
                 tokenCatalog={tokenCatalog}
                 usage={usage}
                 usageRange={usageRange}
+              />
+            ) : page.kind === "pools" ? (
+              <AccountPoolManager
+                key={coreSessionKey}
+                coreSessionKey={coreSessionKey}
+                isReady={isReady}
+                services={catalog.items}
+                onDirtyChange={handleEditorDirtyChange}
+                onServiceSaved={rememberService}
+                onOpenAccount={(serviceId) =>
+                  navigate({ kind: "edit", serviceId })
+                }
               />
             ) : page.kind === "tokens" ? (
               <AccessTokenManager

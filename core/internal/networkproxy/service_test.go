@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/astrlink/core/contract"
+	"github.com/QuantumNous/astrlink/core/internal/secretstore"
 	"github.com/gorilla/websocket"
 )
 
@@ -189,8 +191,13 @@ func TestHTTPSProxyForHTTPAndWebSocket(t *testing.T) {
 }
 
 func TestSOCKS5AuthenticationAndRemoteDNSForHTTPAndWebSocket(t *testing.T) {
+	testCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	upgrader := websocket.Upgrader{}
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Proxy-Authorization") != "" {
+			t.Error("proxy credentials leaked upstream")
+		}
 		if r.URL.Path == "/socket" {
 			conn, err := upgrader.Upgrade(w, r, nil)
 			if err != nil {
@@ -210,13 +217,30 @@ func TestSOCKS5AuthenticationAndRemoteDNSForHTTPAndWebSocket(t *testing.T) {
 	}
 	defer listener.Close()
 	var connected atomic.Int32
+	var connections sync.Map
+	var handlers sync.WaitGroup
+	acceptingDone := make(chan struct{})
+	stop := context.AfterFunc(testCtx, func() { listener.Close() })
+	defer stop()
+	defer func() {
+		cancel()
+		listener.Close()
+		<-acceptingDone
+		connections.Range(func(key, value any) bool { key.(net.Conn).Close(); return true })
+		handlers.Wait()
+	}()
 	go func() {
+		defer close(acceptingDone)
 		for {
 			conn, err := listener.Accept()
 			if err != nil {
 				return
 			}
+			handlers.Add(1)
+			connections.Store(conn, true)
 			go func() {
+				defer handlers.Done()
+				defer connections.Delete(conn)
 				defer conn.Close()
 				_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
 				read := func(n int) []byte {
@@ -270,39 +294,72 @@ func TestSOCKS5AuthenticationAndRemoteDNSForHTTPAndWebSocket(t *testing.T) {
 				defer upstream.Close()
 				connected.Add(1)
 				conn.Write([]byte{5, 0, 0, 1, 127, 0, 0, 1, 0, 80})
-				go io.Copy(upstream, conn)
+				copied := make(chan struct{})
+				go func() { io.Copy(upstream, conn); upstream.Close(); close(copied) }()
 				io.Copy(conn, upstream)
+				conn.Close()
+				upstream.Close()
+				<-copied
 			}()
 		}
 	}()
-	ctx, err := BindConfig(context.Background(), "service_socks", &contract.ServiceProxy{Mode: "custom", URL: "socks5://" + listener.Addr().String()}, &contract.ProxyCredential{Username: "user", Password: "secret"})
-	if err != nil {
-		t.Fatal(err)
+	for _, inherited := range []bool{false, true} {
+		t.Run(fmt.Sprintf("pool-inheritance=%t", inherited), func(t *testing.T) {
+			service := contract.Service{ID: "service_socks"}
+			proxy := &contract.ServiceProxy{Mode: "custom", URL: "socks5://" + listener.Addr().String()}
+			var ctx context.Context
+			var err error
+			if inherited {
+				proxy.CredentialRef = "local://pool-proxy/pool_socks"
+				source := &poolProxyTestSecrets{pool: contract.AccountPool{ID: "pool_socks", Proxy: proxy}}
+				ctx, err = Bind(testCtx, service, source)
+			} else {
+				ctx, err = BindConfig(testCtx, service.ID, proxy, &contract.ProxyCredential{Username: "user", Password: "secret"})
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			client := WrapClient(&http.Client{Timeout: 3 * time.Second})
+			defer client.CloseIdleConnections()
+			req, _ := http.NewRequestWithContext(ctx, "GET", "http://provider.invalid", nil)
+			resp, err := client.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			dialer := *websocket.DefaultDialer
+			target, _ := url.Parse("http://provider.invalid/socket")
+			if err := ConfigureWebSocket(ctx, &dialer, target); err != nil {
+				t.Fatal(err)
+			}
+			conn, _, err := dialer.DialContext(ctx, "ws://provider.invalid/socket", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.Close()
+			_, body, err := conn.ReadMessage()
+			if err != nil || string(body) != "socks" {
+				t.Fatalf("SOCKS WebSocket %s %v", body, err)
+			}
+		})
 	}
-	client := WrapClient(&http.Client{Timeout: 3 * time.Second})
-	defer client.CloseIdleConnections()
-	req, _ := http.NewRequestWithContext(ctx, "GET", "http://provider.invalid", nil)
-	resp, err := client.Do(req)
-	if err != nil {
-		t.Fatal(err)
+	if connected.Load() != 4 {
+		t.Fatalf("expected 4 proxied connections, got %d", connected.Load())
 	}
-	io.Copy(io.Discard, resp.Body)
-	resp.Body.Close()
-	dialer := *websocket.DefaultDialer
-	target, _ := url.Parse("http://provider.invalid/socket")
-	if err := ConfigureWebSocket(ctx, &dialer, target); err != nil {
-		t.Fatal(err)
+}
+
+type poolProxyTestSecrets struct {
+	secretstore.SecretStore
+	pool contract.AccountPool
+}
+
+func (source *poolProxyTestSecrets) AccountPoolMembership(_ context.Context, id contract.ServiceID) (contract.AccountPool, contract.AccountPoolMember, bool, error) {
+	return source.pool, contract.AccountPoolMember{PoolID: source.pool.ID, ServiceID: id, Enabled: true, MaxConcurrentRequests: 2}, true, nil
+}
+func (source *poolProxyTestSecrets) Get(_ context.Context, ref secretstore.Ref) ([]byte, error) {
+	if ref != "local://pool-proxy/pool_socks" {
+		return nil, secretstore.ErrNotFound
 	}
-	conn, _, err := dialer.DialContext(ctx, "ws://provider.invalid/socket", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-	_, body, err := conn.ReadMessage()
-	if err != nil || string(body) != "socks" {
-		t.Fatalf("SOCKS WebSocket %s %v", body, err)
-	}
-	if connected.Load() != 2 {
-		t.Fatal("missing proxied connection")
-	}
+	return []byte(`{"username":"user","password":"secret"}`), nil
 }

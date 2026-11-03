@@ -11,6 +11,7 @@ const bridgeMocks = vi.hoisted(() => ({
   getRoutingSettings: vi.fn(),
   isCCSwitchInstalled: vi.fn(),
   listServices: vi.fn(),
+  getAccountPool: vi.fn(),
   getService: vi.fn(),
   updateService: vi.fn(),
   openCCSwitchImport: vi.fn(),
@@ -25,6 +26,8 @@ const pricingMocks = vi.hoisted(() => ({
 
 vi.mock("./pricing-bridge", () => pricingMocks);
 
+import { testAccountPool, testPoolAccount } from "./account-pool-test-data";
+import { settleClosedLayer } from "./lib/test-layer-settle";
 import type { ConversionEngineCapability } from "./core-model";
 import type { Service } from "./service-model";
 import { ClientSetupDialog } from "./ClientSetupDialog";
@@ -37,6 +40,8 @@ import type {
 } from "./client-config-model";
 
 const token: AccessTokenSummary = {
+  routing_scope: "global" as const,
+  etag: '"token-routing-v1"',
   id: "token_01",
   name: "VS Code",
   hint: "astr_…K8Q2",
@@ -45,6 +50,8 @@ const token: AccessTokenSummary = {
 };
 
 const otherToken: AccessTokenSummary = {
+  routing_scope: "global" as const,
+  etag: '"token-routing-v1"',
   id: "token_02",
   name: "Terminal",
   hint: "astr_…7HT4",
@@ -244,12 +251,13 @@ describe("ClientSetupDialog", () => {
   const renderDialog = async (
     inferenceURL = "http://127.0.0.1:8317",
     conversionEngine?: ConversionEngineCapability | null,
+    selectedToken = token,
   ) => {
     await act(async () => {
       reactRoot.render(
         <ClientSetupDialog
           conversionEngine={conversionEngine}
-          token={token}
+          token={selectedToken}
           tokens={[token, otherToken]}
           inferenceURL={inferenceURL}
           onClose={onClose}
@@ -307,6 +315,44 @@ describe("ClientSetupDialog", () => {
     });
     bridgeMocks.applyClientConfig.mockResolvedValue({ status: "applied" });
   }
+
+  it("only suggests models belonging to a pool key and fails closed when the pool cannot load", async () => {
+    const account = testPoolAccount("service_scoped", {
+      models: ["claude-in-pool"],
+    });
+    const outside = testPoolAccount("service_outside", {
+      models: ["claude-outside"],
+    });
+    const pool = testAccountPool({
+      members: [
+        {
+          pool_id: "pool_claude_test",
+          service_id: account.id,
+          enabled: true,
+          max_concurrent_requests: 2,
+        },
+      ],
+    });
+    bridgeMocks.listServices.mockResolvedValue({ items: [account, outside] });
+    bridgeMocks.getAccountPool.mockResolvedValue(pool);
+    await renderDialog(undefined, undefined, {
+      ...token,
+      routing_scope: "pool",
+      pool_id: pool.id,
+    });
+    expect(await suggestions()).toContain("claude-in-pool");
+    await settleClosedLayer();
+    expect(await suggestions()).not.toContain("claude-outside");
+    await settleClosedLayer();
+    bridgeMocks.getAccountPool.mockRejectedValue(new Error("pool unavailable"));
+    await renderDialog(undefined, undefined, {
+      ...token,
+      routing_scope: "pool",
+      pool_id: "pool_missing",
+    });
+    expect(await suggestions()).not.toContain("claude-outside");
+    await settleClosedLayer();
+  });
 
   it.each([false, true])(
     "enables a missing Codex entry before writing (redirect=%s)",

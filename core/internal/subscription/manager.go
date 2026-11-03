@@ -13,6 +13,7 @@ import (
 
 	"github.com/QuantumNous/astrlink/core/contract"
 	"github.com/QuantumNous/astrlink/core/internal/accountauth"
+	"github.com/QuantumNous/astrlink/core/internal/networkproxy"
 )
 
 const authorizationBoundary = "Logout is local-only: AstrLink removes locally stored credentials; remote revocation is unavailable."
@@ -60,6 +61,7 @@ type Manager struct {
 	pendingProviderAccounts map[string]contract.SubscriptionAccountID
 	lifecycleTransitions    map[contract.ServiceID]bool
 	usageCache              map[contract.ServiceID]usageCacheEntry
+	usageFlights            map[usageFlightKey]*usageFlight
 	riskEvents              RiskEventStore
 	forcedRefreshAt         map[contract.ServiceID]time.Time
 	official                *officialClaude
@@ -447,6 +449,15 @@ func (manager *Manager) Logout(ctx context.Context, id contract.SubscriptionAcco
 }
 
 func (manager *Manager) Delete(ctx context.Context, id contract.ServiceID) error {
+	if guard, ok := manager.accounts.(interface {
+		GuardDeleteAccount(context.Context, contract.ServiceID) (func(), error)
+	}); ok {
+		release, err := guard.GuardDeleteAccount(ctx, id)
+		if err != nil {
+			return err
+		}
+		defer release()
+	}
 	if err := manager.CleanupCredentialsForDelete(ctx, id); err != nil {
 		return err
 	}
@@ -532,11 +543,50 @@ func (manager *Manager) CachedUsage(id contract.ServiceID) (contract.Subscriptio
 	return entry.usage, ok
 }
 
+type usageFlightKey struct {
+	id    contract.ServiceID
+	proxy string
+}
+type usageFlight struct {
+	done  chan struct{}
+	usage contract.SubscriptionUsage
+	err   error
+}
+
+// Usage coalesces overlapping background and manual reads for the same
+// account and frozen proxy configuration. A cancelled waiter does not cancel
+// the query owned by another operation.
 func (manager *Manager) Usage(ctx context.Context, id contract.ServiceID) (contract.SubscriptionUsage, error) {
-	ctx, proxyErr := manager.ProxyContext(ctx, id)
-	if proxyErr != nil {
-		return contract.SubscriptionUsage{}, proxyErr
+	ctx, err := manager.ProxyContext(ctx, id)
+	if err != nil {
+		return contract.SubscriptionUsage{}, err
 	}
+	key := usageFlightKey{id: id, proxy: networkproxy.Binding(ctx)}
+	manager.mu.Lock()
+	if flight := manager.usageFlights[key]; flight != nil {
+		manager.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return contract.SubscriptionUsage{}, ctx.Err()
+		case <-flight.done:
+			return flight.usage, flight.err
+		}
+	}
+	flight := &usageFlight{done: make(chan struct{})}
+	if manager.usageFlights == nil {
+		manager.usageFlights = map[usageFlightKey]*usageFlight{}
+	}
+	manager.usageFlights[key] = flight
+	manager.mu.Unlock()
+	flight.usage, flight.err = manager.readUsage(ctx, id)
+	manager.mu.Lock()
+	delete(manager.usageFlights, key)
+	close(flight.done)
+	manager.mu.Unlock()
+	return flight.usage, flight.err
+}
+
+func (manager *Manager) readUsage(ctx context.Context, id contract.ServiceID) (contract.SubscriptionUsage, error) {
 	now := manager.now().UTC()
 	manager.mu.Lock()
 	if entry, ok := manager.usageCache[id]; ok && now.Before(entry.until) {

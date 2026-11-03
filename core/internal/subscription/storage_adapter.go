@@ -41,3 +41,19 @@ func (adapter StorageAccountStore) DeleteAccount(ctx context.Context, id contrac
 	}
 	return nil
 }
+
+func (adapter StorageAccountStore) GuardDeleteAccount(ctx context.Context, id contract.ServiceID) (func(), error) {
+	guard, ok := adapter.Store.(storage.ServiceDeletionGuard)
+	if !ok {
+		return func() {}, nil
+	}
+	services, ok := adapter.Store.(storage.ServiceStore)
+	if !ok {
+		return func() {}, nil
+	}
+	current, err := services.GetService(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return guard.GuardServiceDeletion(ctx, id, current.ETag)
+}

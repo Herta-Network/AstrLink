@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const bridgeMocks = vi.hoisted(() => ({
   createAccessToken: vi.fn(),
+  listAccountPools: vi.fn(),
+  updateAccessTokenRouting: vi.fn(),
   deleteAccessToken: vi.fn(),
   listAccessTokenUsage: vi.fn(),
   copyAccessToken: vi.fn(),
@@ -24,6 +26,8 @@ import {
   AccessTokenManager,
   type AccessTokenCatalog,
 } from "./AccessTokenManager";
+import { testAccountPool } from "./account-pool-test-data";
+import { settleClosedLayer } from "./lib/test-layer-settle";
 import type { AccessTokenSummary } from "./access-token-model";
 import type {
   ClientConfigOverview,
@@ -35,6 +39,8 @@ import {
 } from "./lib/test-dialog-animations";
 
 const firstToken: AccessTokenSummary = {
+  routing_scope: "global" as const,
+  etag: '"token-routing-v1"',
   id: "token_01",
   name: "VS Code",
   hint: "astr_…K8Q2",
@@ -43,6 +49,8 @@ const firstToken: AccessTokenSummary = {
 };
 
 const secondToken: AccessTokenSummary = {
+  routing_scope: "global" as const,
+  etag: '"token-routing-v1"',
   id: "token_02",
   name: "Terminal",
   hint: "astr_…7HT4",
@@ -133,6 +141,7 @@ describe("AccessTokenManager", () => {
   let reactRoot: Root;
 
   beforeEach(() => {
+    bridgeMocks.listAccountPools.mockResolvedValue([]);
     (
       globalThis as typeof globalThis & {
         IS_REACT_ACT_ENVIRONMENT?: boolean;
@@ -179,6 +188,44 @@ describe("AccessTokenManager", () => {
       await Promise.resolve();
     });
   };
+
+  it("rebinds a pool key using the existing routing ETag", async () => {
+    const pool = testAccountPool();
+    const scoped = {
+      ...firstToken,
+      routing_scope: "pool" as const,
+      pool_id: pool.id,
+    };
+    bridgeMocks.listAccountPools.mockResolvedValue([pool]);
+    bridgeMocks.updateAccessTokenRouting.mockResolvedValue({
+      ...firstToken,
+      etag: '"token-v2"',
+    });
+    await renderManager(readyCatalog([scoped]));
+    const change = document.querySelector<HTMLButtonElement>(
+      `button[aria-label="修改 ${scoped.name} 的访问范围"]`,
+    )!;
+    await act(async () => change.click());
+    const selector = document.querySelector<HTMLButtonElement>(
+      '[role="combobox"][aria-label="访问范围"]',
+    )!;
+    await act(async () =>
+      selector.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+      ),
+    );
+    const global = [
+      ...document.querySelectorAll<HTMLElement>('[role="option"]'),
+    ].find((option) => option.textContent?.includes("全局路由"))!;
+    await act(async () => global.click());
+    await settleClosedLayer();
+    await act(async () => button("保存范围").click());
+    expect(bridgeMocks.updateAccessTokenRouting).toHaveBeenCalledWith(
+      firstToken.id,
+      { routing_scope: "global" },
+      firstToken.etag,
+    );
+  });
 
   it("has the host copy a token without verification and only keeps the latest copy", async () => {
     bridgeMocks.copyAccessToken
@@ -515,7 +562,9 @@ describe("AccessTokenManager", () => {
       await Promise.resolve();
     });
 
-    expect(bridgeMocks.createAccessToken).toHaveBeenCalledWith("VS Code");
+    expect(bridgeMocks.createAccessToken).toHaveBeenCalledWith("VS Code", {
+      routing_scope: "global",
+    });
     expect(container.textContent).toContain(firstToken.name);
     expect(container.textContent).not.toContain(firstSecret);
     expect(
@@ -565,7 +614,9 @@ describe("AccessTokenManager", () => {
     await submit();
 
     const taken = "已有同名令牌，请换一个名称。";
-    expect(bridgeMocks.createAccessToken).toHaveBeenCalledWith("vs code");
+    expect(bridgeMocks.createAccessToken).toHaveBeenCalledWith("vs code", {
+      routing_scope: "global",
+    });
     expect(dialog()?.textContent).toContain(taken);
     expect(container.textContent).not.toContain(taken);
     expect(document.body.textContent).not.toContain("returned 409");

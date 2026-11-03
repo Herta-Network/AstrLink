@@ -192,7 +192,7 @@ export function SessionChannelBindings({
                 <ul className="divide-y">
                   {activeBindings.map((binding) => (
                     <li
-                      key={`${binding.local_access_token_id}:${binding.protocol}:${binding.model}`}
+                      key={`${binding.local_access_token_id}:${binding.pool_id ?? ""}:${binding.protocol}:${binding.model}`}
                       className="flex flex-wrap items-center justify-between gap-2 px-4 py-3"
                     >
                       <div className="min-w-0 flex-1 basis-56">

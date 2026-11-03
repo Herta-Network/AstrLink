@@ -1,3 +1,5 @@
+import { controlErrorMessage } from "./control-error";
+import { serviceProxyTestTarget } from "./service-proxy-model";
 import { KiroAuthorizationEditor } from "./components/KiroAuthorizationEditor";
 import {
   defaultKiroLoginDraft,
@@ -787,7 +789,7 @@ function draftSignature(draft: Draft): string {
 }
 
 function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback;
+  return controlErrorMessage(error, fallback);
 }
 
 function authForDraft(draft: Draft) {
@@ -3372,22 +3374,7 @@ export function ServiceManager({
       (redirect) =>
         !redirectBuiltins.some((builtin) => builtin.from === redirect.from),
     ).length;
-  const proxyTestTarget =
-    draft.kind === "codex_subscription"
-      ? "https://chatgpt.com"
-      : draft.kind === "claude_subscription"
-        ? "https://api.anthropic.com"
-        : draft.kind === "grok_subscription"
-          ? "https://api.x.ai"
-          : draft.kind === "antigravity_subscription"
-            ? "https://daily-cloudcode-pa.googleapis.com"
-            : draft.kind === "copilot_subscription"
-              ? "https://api.githubcopilot.com"
-              : draft.kind === "droid_subscription"
-                ? "https://api.factory.ai"
-                : draft.kind === "kiro_subscription"
-                  ? "https://codewhisperer.us-east-1.amazonaws.com"
-                  : draft.baseURL.trim();
+  const proxyTestTarget = serviceProxyTestTarget(draft.kind, draft.baseURL);
   const connectionFields = (
     <div className="grid min-w-0 gap-4 pb-2 @[760px]:grid-cols-2">
       <Panel>

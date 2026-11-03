@@ -36,7 +36,7 @@ export function RoutingSteps({
 }) {
   const t = useT();
   const steps = routingSteps(routes, decision);
-  if (steps.length === 0) return null;
+  if (steps.length === 0 && !decision?.pool) return null;
   // Each step's words after the name: why it was skipped or refused, or why
   // and how the used one was called.
   const details = (step: RoutingStep): string[] =>
@@ -54,6 +54,14 @@ export function RoutingSteps({
   return (
     <div className="grid gap-1 text-xs" data-testid="routing-steps">
       <h3 className="text-muted-foreground">{t("routingDecision.title")}</h3>
+      {decision?.pool ? (
+        <p className="text-muted-foreground">
+          {t("pools.routingPool", { name: decision.pool.name })}
+          {decision.pool.wait_ms > 0
+            ? ` · ${t("pools.routingWait", { ms: decision.pool.wait_ms })}`
+            : ""}
+        </p>
+      ) : null}
       <ol className="grid gap-1">
         {steps.map((step, index) => {
           const text = details(step).join(" · ");

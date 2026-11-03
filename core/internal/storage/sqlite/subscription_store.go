@@ -89,6 +89,7 @@ ON CONFLICT(id) DO UPDATE SET document_json = json_set(services.document_json,
 	if err != nil {
 		return fmt.Errorf("upsert subscription service: %w", err)
 	}
+	store.notifyAccountPools()
 	return nil
 }
 
@@ -128,6 +129,13 @@ func (store *Store) DeleteSubscriptionAccount(ctx context.Context, id contract.S
 	if err := id.Validate(); err != nil {
 		return fmt.Errorf("%w: %v", storagecontract.ErrInvalidArgument, err)
 	}
+	var pooled bool
+	if err := store.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM account_pool_members WHERE service_id = ?)`, id).Scan(&pooled); err != nil {
+		return err
+	}
+	if pooled {
+		return storagecontract.ErrPoolMembership
+	}
 	result, err := store.db.ExecContext(ctx, `DELETE FROM services WHERE id = ? AND json_extract(document_json, '$.kind') IN ('codex_subscription', 'claude_subscription', 'grok_subscription', 'antigravity_subscription', 'copilot_subscription', 'droid_subscription', 'kiro_subscription')`, id)
 	if err != nil {
 		return fmt.Errorf("delete subscription account: %w", err)
@@ -139,6 +147,7 @@ func (store *Store) DeleteSubscriptionAccount(ctx context.Context, id contract.S
 	if affected == 0 {
 		return fmt.Errorf("%w: subscription account %q", storagecontract.ErrNotFound, id)
 	}
+	store.notifyAccountPools()
 	return nil
 }
 

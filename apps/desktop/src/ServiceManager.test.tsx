@@ -1693,7 +1693,7 @@ describe("ServiceManager", () => {
       )?.value,
     ).toBe("");
     expect(container.textContent).toContain("保留已保存认证");
-    await chooseOption("代理模式", "继承全局");
+    await chooseOption("代理模式", "继承号池或全局");
     await act(async () =>
       container
         .querySelector("form")!

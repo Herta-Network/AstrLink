@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/astrlink/core/contract"
 	"github.com/QuantumNous/astrlink/core/internal/accesstoken"
 	"github.com/QuantumNous/astrlink/core/internal/accountauth"
+	"github.com/QuantumNous/astrlink/core/internal/accountpool"
 	"github.com/QuantumNous/astrlink/core/internal/codingplan"
 	"github.com/QuantumNous/astrlink/core/internal/controlapi"
 	"github.com/QuantumNous/astrlink/core/internal/endpoint"
@@ -213,6 +214,11 @@ func openPersistentCore(ctx context.Context, options persistentOptions) (*persis
 		return fail("configure subscription manager: %w", err)
 	}
 	subscriptionManager.SetRiskEventStore(store)
+	poolRuntime, err := accountpool.NewRuntime(ctx, store)
+	if err != nil {
+		return fail("configure account pools: %w", err)
+	}
+	poolRuntime.WithUsageCache(subscriptionManager)
 	claudeOfficial, err := enableOfficialClaude(subscriptionManager, options, networkproxy.Resolver(store, store))
 	if err != nil {
 		logf("official Claude accounts are unavailable: %v", err)
@@ -235,7 +241,10 @@ func openPersistentCore(ctx context.Context, options persistentOptions) (*persis
 				return err
 			}
 			_, err = store.ObserveSubscriptionPlan(ctx, account.ID, account.ProviderAccountID, usage.PlanType)
-			return err
+			if err != nil {
+				return err
+			}
+			return poolRuntime.ObserveUsage(ctx, account.ID, usage)
 		},
 		func(ctx context.Context, account contract.SubscriptionAccount) error {
 			current, err := store.GetService(ctx, account.ID)
@@ -261,9 +270,11 @@ func openPersistentCore(ctx context.Context, options persistentOptions) (*persis
 		Resolver:         resolver,
 		Authorizer: endpoint.NewServiceAuthorizer(store, subscriptionManager, subscriptionManager.Provider().IdentityPolicy()).
 			WithRoutingSettings(store).WithIdentities(identities).WithVertexTokens(vertexTokens),
+		AccountPools: store,
+		PoolRuntime:  poolRuntime,
 		AccessTokenAuthenticator: ingress.AccessTokenAuthenticatorFunc(
-			func(ctx context.Context, raw string) (contract.AccessTokenID, error) {
-				return accessTokenManager.Authenticate(ctx, raw)
+			func(ctx context.Context, raw string) (ingress.AuthenticatedAccessToken, error) {
+				return accessTokenManager.AuthenticatePrincipal(ctx, raw)
 			},
 		),
 		PrivacyFilter: privacyFilter,
@@ -291,6 +302,7 @@ func openPersistentCore(ctx context.Context, options persistentOptions) (*persis
 		ClaudeOfficial:           claudeOfficial.serving(),
 	}
 	handler, err := controlapi.NewWithDependencies(options.version, controlapi.Dependencies{
+		PoolRuntime:  poolRuntime,
 		ServiceStore: store,
 		PricingStore: store, PricingManager: pricingManager,
 		AccessTokenManager: accessTokenManager,

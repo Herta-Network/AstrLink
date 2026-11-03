@@ -234,7 +234,7 @@ func createAccessToken(t *testing.T, store *sqlite.Store, name string) accesstok
 	if err != nil {
 		t.Fatalf("access token manager: %v", err)
 	}
-	created, err := manager.Create(context.Background(), name)
+	created, err := manager.Create(context.Background(), name, contract.AccessTokenRouting{RoutingScope: contract.RoutingScopeGlobal})
 	if err != nil {
 		t.Fatalf("create access token: %v", err)
 	}

@@ -2305,9 +2305,87 @@ async fn list_access_token_usage(
 #[tauri::command]
 async fn create_access_token(
     name: String,
+    routing: serde_json::Value,
     manager: State<'_, Arc<CoreManager>>,
 ) -> Result<serde_json::Value, String> {
-    manager.create_access_token(&name).await
+    manager.create_access_token(&name, routing).await
+}
+
+#[tauri::command]
+async fn list_account_pools(
+    manager: State<'_, Arc<CoreManager>>,
+) -> Result<serde_json::Value, String> {
+    manager.list_account_pools().await
+}
+
+#[tauri::command]
+async fn get_account_pool(
+    pool_id: String,
+    manager: State<'_, Arc<CoreManager>>,
+) -> Result<serde_json::Value, String> {
+    manager.get_account_pool(&pool_id).await
+}
+
+#[tauri::command]
+async fn create_account_pool(
+    input: serde_json::Value,
+    manager: State<'_, Arc<CoreManager>>,
+) -> Result<serde_json::Value, String> {
+    manager.create_account_pool(input).await
+}
+
+#[tauri::command]
+async fn update_account_pool(
+    pool_id: String,
+    patch: serde_json::Value,
+    etag: String,
+    manager: State<'_, Arc<CoreManager>>,
+) -> Result<serde_json::Value, String> {
+    manager.update_account_pool(&pool_id, patch, &etag).await
+}
+
+#[tauri::command]
+async fn replace_account_pool_members(
+    pool_id: String,
+    members: serde_json::Value,
+    etag: String,
+    manager: State<'_, Arc<CoreManager>>,
+) -> Result<serde_json::Value, String> {
+    manager
+        .replace_account_pool_members(&pool_id, members, &etag)
+        .await
+}
+
+#[tauri::command]
+async fn delete_account_pool(
+    pool_id: String,
+    etag: String,
+    manager: State<'_, Arc<CoreManager>>,
+) -> Result<(), String> {
+    manager.delete_account_pool(&pool_id, &etag).await
+}
+
+#[tauri::command]
+async fn probe_account_pool_quota(
+    pool_id: String,
+    service_id: String,
+    manager: State<'_, Arc<CoreManager>>,
+) -> Result<(), String> {
+    manager
+        .probe_account_pool_quota(&pool_id, &service_id)
+        .await
+}
+
+#[tauri::command]
+async fn update_access_token_routing(
+    token_id: String,
+    routing: serde_json::Value,
+    etag: String,
+    manager: State<'_, Arc<CoreManager>>,
+) -> Result<serde_json::Value, String> {
+    manager
+        .update_access_token_routing(&token_id, routing, &etag)
+        .await
 }
 
 /// Copies an access token from Core straight to the clipboard: the token
@@ -2826,6 +2904,14 @@ pub fn run() {
             get_usage_summary,
             get_privacy_summary,
             create_access_token,
+            list_account_pools,
+            get_account_pool,
+            create_account_pool,
+            update_account_pool,
+            replace_account_pool_members,
+            delete_account_pool,
+            probe_account_pool_quota,
+            update_access_token_routing,
             copy_access_token,
             cc_switch_installed,
             open_cc_switch_import,

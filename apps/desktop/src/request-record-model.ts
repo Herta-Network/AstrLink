@@ -195,6 +195,7 @@ export interface RequestModelRedirect {
 
 /** Why an attempt used its API provider. */
 export type RoutingSelection =
+  | "pool_balance"
   | "priority"
   | "session_binding"
   | "response_affinity"
@@ -229,6 +230,12 @@ export interface RoutingSkip {
  * selected); providers tried and rejected show up as events or retry children.
  */
 export interface RequestRoutingDecision {
+  pool?: {
+    id: string;
+    name: string;
+    routing_scope: "global" | "pool";
+    wait_ms: number;
+  };
   selected?: RoutingSelection;
   skipped: RoutingSkip[];
 }
@@ -1366,6 +1373,7 @@ function optionalOutput(
 }
 
 const routingSelections = new Set<RoutingSelection>([
+  "pool_balance",
   "priority",
   "session_binding",
   "response_affinity",
@@ -1423,6 +1431,17 @@ function optionalRoutingDecision(
       invalid(`${path}.selected`, "unknownReason");
     }
     parsed.selected = decision.selected as RoutingSelection;
+  }
+  if (decision.pool !== undefined) {
+    const pool = objectAt(decision.pool, `${path}.pool`);
+    if (pool.routing_scope !== "global" && pool.routing_scope !== "pool")
+      invalid(`${path}.pool.routing_scope`, "unknownReason");
+    parsed.pool = {
+      id: stringAt(pool.id, `${path}.pool.id`),
+      name: stringAt(pool.name, `${path}.pool.name`),
+      routing_scope: pool.routing_scope,
+      wait_ms: nonNegativeIntAt(pool.wait_ms, `${path}.pool.wait_ms`),
+    };
   }
   return { routing_decision: parsed };
 }

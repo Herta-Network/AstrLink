@@ -6,6 +6,7 @@ import (
 )
 
 type ResponseAffinity struct {
+	PoolID           contract.AccountPoolID
 	ServiceID        contract.ServiceID
 	UpstreamModel    string
 	UpstreamProtocol contract.ProtocolID

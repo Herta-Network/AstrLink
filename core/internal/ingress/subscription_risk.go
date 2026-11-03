@@ -49,8 +49,9 @@ const (
 )
 
 type subscriptionRiskSignal struct {
-	scope       subscriptionRiskScope
-	observation contract.SubscriptionRiskObservation
+	quotaWindows []contract.AccountQuotaWindow
+	scope        subscriptionRiskScope
+	observation  contract.SubscriptionRiskObservation
 	// cooldown is the model-route cooldown for model-scoped signals.
 	cooldown     time.Duration
 	unauthorized bool
@@ -98,9 +99,17 @@ func classifySubscriptionRisk(
 	details, structured := parseSubscriptionError(body, now)
 	switch kind {
 	case contract.ServiceKindClaudeSubscription:
-		return classifyClaudeRisk(status, header, details, structured, now)
+		signal := classifyClaudeRisk(status, header, details, structured, now)
+		if signal.quotaExhausted() {
+			signal.quotaWindows = claudeQuotaWindows(header, now)
+		}
+		return signal
 	case contract.ServiceKindCodexSubscription:
-		return classifyCodexRisk(status, header, details, structured, now)
+		signal := classifyCodexRisk(status, header, details, structured, now)
+		if signal.quotaExhausted() && !details.resetAt.IsZero() {
+			signal.quotaWindows = []contract.AccountQuotaWindow{{ID: "account", ResetAt: &details.resetAt}}
+		}
+		return signal
 	case contract.ServiceKindCopilotSubscription, contract.ServiceKindDroidSubscription:
 		// These providers have no account-risk classifier; a rejected token is
 		// re-checked so a revoked one asks for a new sign-in.
@@ -411,13 +420,23 @@ func (handler *Handler) applySubscriptionRisk(
 	signal subscriptionRiskSignal,
 	upstreamHeaders http.Header,
 ) {
+	quotaHandled := false
+	if handler.poolRuntime != nil && signal.quotaExhausted() {
+		recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), subscriptionRiskReportTimeout)
+		handled, err := handler.poolRuntime.ObserveExhaustion(recordCtx, candidate.CanonicalService().ID, signal.quotaWindows)
+		quotaHandled = handled
+		cancel()
+		if err != nil {
+			handler.logSubscriptionRisk("record pool quota: %v", err)
+		}
+	}
 	reporter := handler.subscriptionRisk
 	if reporter == nil {
 		return
 	}
 	id := candidate.CanonicalService().ID
 	detached := context.WithoutCancel(ctx)
-	if signal.scope == subscriptionRiskAccount {
+	if signal.scope == subscriptionRiskAccount && !quotaHandled {
 		observation := signal.observation
 		if observation.PausedUntil != nil && !observation.Forbidden {
 			until := observation.PausedUntil.Add(subscriptionRiskJitter())
@@ -539,12 +558,54 @@ func (handler *Handler) watchSubscriptionStream(
 	header http.Header,
 	body io.ReadCloser,
 ) io.ReadCloser {
-	if handler.subscriptionRisk == nil || !subscriptionRiskKind(candidate.Service.Kind) || status >= 400 ||
+	if handler.subscriptionRisk == nil && handler.poolRuntime == nil || !subscriptionRiskKind(candidate.Service.Kind) || status >= 400 ||
 		strings.TrimSpace(header.Get("Content-Encoding")) != "" ||
 		!strings.HasPrefix(strings.ToLower(header.Get("Content-Type")), "text/event-stream") {
 		return body
 	}
 	return newSubscriptionStreamRiskReader(body, candidate.Service.Kind, func(signal subscriptionRiskSignal) {
+		if handler.poolRuntime != nil && signal.quotaExhausted() {
+			// Fence further pool admissions before the current stream can
+			// release its slot; no replay of already committed output.
+			handler.applySubscriptionRisk(ctx, candidate, signal, nil)
+			return
+		}
 		go handler.applySubscriptionRisk(ctx, candidate, signal, nil)
 	})
+}
+
+// Quota recovery is separate from a generic timed risk pause. Missing reset
+// evidence stays unknown instead of borrowing the risk classifier's fallback.
+func (signal subscriptionRiskSignal) quotaExhausted() bool {
+	if signal.scope != subscriptionRiskAccount {
+		return false
+	}
+	switch signal.observation.Code {
+	case contract.RiskCodeUsageLimitReached, contract.RiskCodeRateLimit5h, contract.RiskCodeRateLimit7d:
+		return true
+	default:
+		return false
+	}
+}
+
+func claudeQuotaWindows(header http.Header, now time.Time) []contract.AccountQuotaWindow {
+	var windows []contract.AccountQuotaWindow
+	for _, value := range []struct {
+		name, id string
+		seconds  int64
+	}{{"5h", "primary", 18000}, {"7d", "secondary", 604800}} {
+		prefix := "Anthropic-Ratelimit-Unified-" + value.name + "-"
+		if !strings.EqualFold(strings.TrimSpace(header.Get(prefix+"Status")), "rejected") {
+			continue
+		}
+		seconds := value.seconds
+		window := contract.AccountQuotaWindow{ID: value.id, LimitWindowSeconds: &seconds}
+		// Only a window-specific reset is evidence for that window. The
+		// aggregate reset may describe the other exhausted window.
+		if at, ok := parseRiskReset(header.Get(prefix+"Reset"), now); ok {
+			window.ResetAt = &at
+		}
+		windows = append(windows, window)
+	}
+	return windows
 }

@@ -59,11 +59,11 @@ func TestProductionGateResolvesSQLiteEndpointAndLoadsDedicatedCredential(t *test
 				Body: io.NopCloser(strings.NewReader(`{"id":"resp_from_upstream"}`)),
 			}, nil
 		})),
-		AccessTokenAuthenticator: AccessTokenAuthenticatorFunc(func(_ context.Context, raw string) (contract.AccessTokenID, error) {
+		AccessTokenAuthenticator: AccessTokenAuthenticatorFunc(func(_ context.Context, raw string) (AuthenticatedAccessToken, error) {
 			if raw != "astr_0123456789abcdefghijklmnopqrstuvwxyzABCDEFG" {
-				return "", storage.ErrNotFound
+				return AuthenticatedAccessToken{}, storage.ErrNotFound
 			}
-			return "token_production", nil
+			return testAccessTokenPrincipal("token_production"), nil
 		}),
 		AllowedHost: "127.0.0.1:8317",
 	})
@@ -230,11 +230,11 @@ func TestProductionGateRoutesToSelectedCodexSubscriptionService(t *testing.T) {
 				Body: io.NopCloser(strings.NewReader(`{"id":"resp_from_codex_work"}`)),
 			}, nil
 		})),
-		AccessTokenAuthenticator: AccessTokenAuthenticatorFunc(func(_ context.Context, raw string) (contract.AccessTokenID, error) {
+		AccessTokenAuthenticator: AccessTokenAuthenticatorFunc(func(_ context.Context, raw string) (AuthenticatedAccessToken, error) {
 			if raw != "astr_local-client-token" {
-				return "", storage.ErrNotFound
+				return AuthenticatedAccessToken{}, storage.ErrNotFound
 			}
-			return "token_production", nil
+			return testAccessTokenPrincipal("token_production"), nil
 		}),
 		AllowedHost: "127.0.0.1:8317",
 	})

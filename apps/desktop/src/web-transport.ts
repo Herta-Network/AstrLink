@@ -397,6 +397,35 @@ const commands: Record<string, Command> = {
   update_audit_settings: route("/audit-settings", "PATCH", patch),
   local_data_status: route("/local-data"),
   list_access_tokens: route("/access-tokens"),
+  list_account_pools: route("/account-pools"),
+  get_account_pool: route((a) => `/account-pools/${id(a, "poolId")}`),
+  create_account_pool: route("/account-pools", "POST", input),
+  update_account_pool: route(
+    (a) => `/account-pools/${id(a, "poolId")}`,
+    "PATCH",
+    patch,
+  ),
+  replace_account_pool_members: route(
+    (a) => `/account-pools/${id(a, "poolId")}/members`,
+    "PUT",
+    (a) => ({ members: a.members }),
+  ),
+  delete_account_pool: route(
+    (a) => `/account-pools/${id(a, "poolId")}`,
+    "DELETE",
+  ),
+  probe_account_pool_quota: route(
+    (a) =>
+      `/account-pools/${id(a, "poolId")}/members/${id(a, "serviceId")}/quota-probe`,
+    "POST",
+    () => ({}),
+  ),
+  update_access_token_routing: route(
+    (a) => `/access-tokens/${id(a, "tokenId")}`,
+    "PATCH",
+    (a) => a.routing,
+  ),
+
   list_network_addresses: route("/network-addresses"),
   list_access_token_usage: route(
     (a) => `/access-token-usage${query({ today_from: a.todayFrom })}`,
@@ -411,6 +440,7 @@ const commands: Record<string, Command> = {
   ),
   create_access_token: route("/access-tokens", "POST", (a) => ({
     name: a.name,
+    ...(a.routing as Record<string, unknown>),
   })),
   copy_access_token: async (a) => {
     const { value } = await consoleRequest(

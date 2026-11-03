@@ -2009,17 +2009,151 @@ impl CoreManager {
             .map_err(|error| format!("access token usage returned invalid JSON: {error}"))
     }
 
-    pub async fn create_access_token(&self, name: &str) -> Result<serde_json::Value, String> {
+    pub async fn create_access_token(
+        &self,
+        name: &str,
+        routing: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
         let (_, body) = self
             .authenticated_control(
                 Method::POST,
                 "/control/v1/access-tokens",
-                Some(serde_json::json!({ "name": name })),
+                Some({
+                    let mut input = routing
+                        .as_object()
+                        .cloned()
+                        .ok_or("invalid token routing")?;
+                    input.insert("name".into(), name.into());
+                    serde_json::Value::Object(input)
+                }),
                 None,
             )
             .await?;
         serde_json::from_slice(&body)
             .map_err(|error| format!("access token create returned invalid JSON: {error}"))
+    }
+
+    pub async fn list_account_pools(&self) -> Result<serde_json::Value, String> {
+        let (_, body) = self
+            .authenticated_control(Method::GET, "/control/v1/account-pools", None, None)
+            .await?;
+        serde_json::from_slice(&body)
+            .map_err(|error| format!("invalid account pool response: {error}"))
+    }
+
+    pub async fn get_account_pool(&self, pool_id: &str) -> Result<serde_json::Value, String> {
+        validate_resource_id(pool_id)?;
+        let (_, body) = self
+            .authenticated_control(
+                Method::GET,
+                &format!("/control/v1/account-pools/{pool_id}"),
+                None,
+                None,
+            )
+            .await?;
+        serde_json::from_slice(&body)
+            .map_err(|error| format!("invalid account pool response: {error}"))
+    }
+
+    pub async fn create_account_pool(
+        &self,
+        input: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        let (_, body) = self
+            .authenticated_control(Method::POST, "/control/v1/account-pools", Some(input), None)
+            .await?;
+        serde_json::from_slice(&body)
+            .map_err(|error| format!("invalid account pool response: {error}"))
+    }
+
+    pub async fn update_account_pool(
+        &self,
+        pool_id: &str,
+        patch: serde_json::Value,
+        etag: &str,
+    ) -> Result<serde_json::Value, String> {
+        validate_resource_id(pool_id)?;
+        validate_strong_etag(etag)?;
+        let (_, body) = self
+            .authenticated_control(
+                Method::PATCH,
+                &format!("/control/v1/account-pools/{pool_id}"),
+                Some(patch),
+                Some(etag),
+            )
+            .await?;
+        serde_json::from_slice(&body)
+            .map_err(|error| format!("invalid account pool response: {error}"))
+    }
+
+    pub async fn replace_account_pool_members(
+        &self,
+        pool_id: &str,
+        members: serde_json::Value,
+        etag: &str,
+    ) -> Result<serde_json::Value, String> {
+        validate_resource_id(pool_id)?;
+        validate_strong_etag(etag)?;
+        let (_, body) = self
+            .authenticated_control(
+                Method::PUT,
+                &format!("/control/v1/account-pools/{pool_id}/members"),
+                Some(serde_json::json!({"members": members})),
+                Some(etag),
+            )
+            .await?;
+        serde_json::from_slice(&body)
+            .map_err(|error| format!("invalid account pool response: {error}"))
+    }
+
+    pub async fn delete_account_pool(&self, pool_id: &str, etag: &str) -> Result<(), String> {
+        validate_resource_id(pool_id)?;
+        validate_strong_etag(etag)?;
+        self.authenticated_control(
+            Method::DELETE,
+            &format!("/control/v1/account-pools/{pool_id}"),
+            None,
+            Some(etag),
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn probe_account_pool_quota(
+        &self,
+        pool_id: &str,
+        service_id: &str,
+    ) -> Result<(), String> {
+        validate_resource_id(pool_id)?;
+        validate_resource_id(service_id)?;
+        self.authenticated_control(
+            Method::POST,
+            &format!("/control/v1/account-pools/{pool_id}/members/{service_id}/quota-probe"),
+            Some(serde_json::json!({})),
+            None,
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn update_access_token_routing(
+        &self,
+        token_id: &str,
+        routing: serde_json::Value,
+        etag: &str,
+    ) -> Result<serde_json::Value, String> {
+        validate_resource_id(token_id)?;
+        validate_strong_etag(etag)?;
+        let (_, body) = self
+            .authenticated_control(
+                Method::PATCH,
+                &format!("/control/v1/access-tokens/{token_id}"),
+                Some(routing),
+                Some(etag),
+            )
+            .await?;
+        serde_json::from_slice(&body)
+            .map_err(|error| format!("invalid account pool response: {error}"))
     }
 
     pub async fn reveal_access_token(&self, token_id: &str) -> Result<serde_json::Value, String> {
@@ -2527,8 +2661,13 @@ impl CoreManager {
         if input["proxy"]["mode"].as_str() != Some("custom") {
             return Err("proxy test requires a custom proxy".into());
         }
-        if let Some(id) = input.get("service_id") {
-            validate_resource_id(id.as_str().ok_or("invalid service id")?)?;
+        for key in ["service_id", "pool_id"] {
+            if let Some(id) = input.get(key) {
+                validate_resource_id(id.as_str().ok_or("invalid proxy owner id")?)?;
+            }
+        }
+        if input.get("service_id").is_some() && input.get("pool_id").is_some() {
+            return Err("choose either a service or a pool".into());
         }
         let (_, body) = self
             .authenticated_control(Method::POST, SERVICE_PROXY_PROBES_PATH, Some(input), None)

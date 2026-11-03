@@ -1,3 +1,4 @@
+import { parseTokenRouting } from "./account-pool-model";
 import { parseBillingAmounts, type BillingAmounts } from "./pricing-model";
 import { parseUsagePerformance } from "./usage-summary-model";
 import type { ServicePerformance } from "./usage-range";
@@ -9,6 +10,9 @@ import type { ServicePerformance } from "./usage-range";
 export type AccessTokenSource = "user" | "system_default";
 
 export interface AccessTokenSummary {
+  routing_scope: "global" | "pool";
+  pool_id?: string;
+  etag: string;
   id: string;
   name: string;
   hint: string;
@@ -87,7 +91,10 @@ function stringAt(
   return value;
 }
 
-function parseAccessToken(value: unknown, path: string): AccessTokenSummary {
+export function parseAccessToken(
+  value: unknown,
+  path = "$",
+): AccessTokenSummary {
   const token = objectAt(value, path);
   // Older Core versions list no source; their tokens read as created ones.
   exactKeys(
@@ -98,6 +105,9 @@ function parseAccessToken(value: unknown, path: string): AccessTokenSummary {
       "hint",
       ...("source" in token ? ["source"] : []),
       "created_at",
+      "routing_scope",
+      "etag",
+      ...(Object.hasOwn(token, "pool_id") ? ["pool_id"] : []),
     ],
     path,
   );
@@ -118,7 +128,13 @@ function parseAccessToken(value: unknown, path: string): AccessTokenSummary {
     invalid(`${path}.source`, "expected user or system_default");
   }
 
+  const routing = parseTokenRouting(token, path);
+  const etag = stringAt(token.etag, `${path}.etag`, 3, 128);
+  if (!/^"[^"\r\n]+"$/.test(etag))
+    invalid(`${path}.etag`, "expected a strong ETag");
   return {
+    ...routing,
+    etag,
     id,
     name,
     hint,

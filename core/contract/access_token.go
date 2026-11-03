@@ -18,6 +18,7 @@ func (id AccessTokenID) Validate() error {
 // here. Source is "user" for a token the user created and "system_default" for
 // the bootstrap token this installation issued.
 type AccessTokenDocument struct {
+	AccessTokenRouting
 	Name      string    `json:"name"`
 	Source    string    `json:"source"`
 	CreatedAt time.Time `json:"created_at"`

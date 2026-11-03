@@ -289,7 +289,7 @@ func TestSyncWriteAccessTokenLeavesAnUnchangedTokenAlone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("manager: %v", err)
 	}
-	created, err := manager.Create(ctx, "work")
+	created, err := manager.Create(ctx, "work", contract.AccessTokenRouting{RoutingScope: contract.RoutingScopeGlobal})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -297,7 +297,8 @@ func TestSyncWriteAccessTokenLeavesAnUnchangedTokenAlone(t *testing.T) {
 		t.Fatalf("clear: %v", err)
 	}
 	document, err := json.Marshal(contract.AccessTokenDocument{
-		Name: created.Token.Name, Source: string(storagecontract.AccessTokenSourceUser),
+		AccessTokenRouting: contract.AccessTokenRouting{RoutingScope: contract.RoutingScopeGlobal},
+		Name:               created.Token.Name, Source: string(storagecontract.AccessTokenSourceUser),
 		CreatedAt: created.Token.CreatedAt,
 	})
 	if err != nil {
@@ -330,11 +331,11 @@ func TestSyncWriteAccessTokenKeepsBothNames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("manager: %v", err)
 	}
-	held, err := manager.Create(ctx, "work")
+	held, err := manager.Create(ctx, "work", contract.AccessTokenRouting{RoutingScope: contract.RoutingScopeGlobal})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	arriving, err := manager.Create(ctx, "elsewhere")
+	arriving, err := manager.Create(ctx, "elsewhere", contract.AccessTokenRouting{RoutingScope: contract.RoutingScopeGlobal})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -342,7 +343,8 @@ func TestSyncWriteAccessTokenKeepsBothNames(t *testing.T) {
 		t.Fatalf("delete: %v", err)
 	}
 	document, err := json.Marshal(contract.AccessTokenDocument{
-		Name: "work", Source: string(storagecontract.AccessTokenSourceUser), CreatedAt: time.Now().UTC(),
+		AccessTokenRouting: contract.AccessTokenRouting{RoutingScope: contract.RoutingScopeGlobal},
+		Name:               "work", Source: string(storagecontract.AccessTokenSourceUser), CreatedAt: time.Now().UTC(),
 	})
 	if err != nil {
 		t.Fatalf("document: %v", err)

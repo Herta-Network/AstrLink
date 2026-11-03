@@ -46,6 +46,7 @@ const (
 )
 
 type Store struct {
+	poolObserver      storagecontract.AccountPoolObserver
 	serviceDocuments  serviceDocumentCache
 	usageSummaries    historyCache
 	requestSessions   historyCache
@@ -398,7 +399,7 @@ func (store *Store) CreateAccessToken(ctx context.Context, candidate storagecont
 func (store *Store) ListAccessTokens(ctx context.Context) ([]storagecontract.AccessTokenMetadata, error) {
 	// This projection is intentionally metadata-only. In particular, neither
 	// token_hash nor local_access_token_secrets participates in this query.
-	rows, err := store.db.QueryContext(ctx, `SELECT id, name, name_key, token_hint, source, created_at
+	rows, err := store.db.QueryContext(ctx, `SELECT id, name, name_key, token_hint, source, created_at, routing_scope, COALESCE(pool_id, ''), routing_revision
 FROM local_access_tokens
 ORDER BY created_at, id`)
 	if err != nil {
@@ -425,7 +426,7 @@ func (store *Store) RevealAccessToken(ctx context.Context, id contract.AccessTok
 		return "", fmt.Errorf("%w: %v", storagecontract.ErrInvalidArgument, err)
 	}
 	row, err := store.readAccessTokenMaterial(store.db.QueryRowContext(ctx, `SELECT
-    t.id, t.name, t.name_key, t.token_hash, t.token_hint, t.source, t.created_at, s.token_value, s.sealed
+    t.id, t.name, t.name_key, t.token_hash, t.token_hint, t.source, t.created_at, t.routing_scope, COALESCE(t.pool_id, ''), t.routing_revision, s.token_value, s.sealed
 FROM local_access_tokens AS t
 LEFT JOIN local_access_token_secrets AS s ON s.token_id = t.id
 WHERE t.id = ?`, id))
@@ -453,6 +454,7 @@ func (store *Store) DeleteAccessToken(ctx context.Context, id contract.AccessTok
 	if deleted == 0 {
 		return fmt.Errorf("%w: access token %q", storagecontract.ErrNotFound, id)
 	}
+	store.notifyAccountPools()
 	return nil
 }
 
@@ -460,14 +462,15 @@ func (store *Store) DeleteAccessToken(ctx context.Context, id contract.AccessTok
 // the sealed token value, so the hot path needs no decryption and tokens keep
 // working when the stored values no longer decrypt (plan §5.7).
 func (store *Store) FindAccessTokenByHash(ctx context.Context, hash storagecontract.AccessTokenHash) (storagecontract.AccessTokenMetadata, error) {
-	var id, name, nameKey, hint, source, createdAt string
+	var id, name, nameKey, hint, source, createdAt, routingScope, poolID string
+	var revision int64
 	var hashBytes []byte
 	var hasSecret bool
 	err := store.db.QueryRowContext(ctx, `SELECT
-    t.id, t.name, t.name_key, t.token_hash, t.token_hint, t.source, t.created_at,
+    t.id, t.name, t.name_key, t.token_hash, t.token_hint, t.source, t.created_at, t.routing_scope, COALESCE(t.pool_id, ''), t.routing_revision,
     EXISTS(SELECT 1 FROM local_access_token_secrets AS s WHERE s.token_id = t.id)
 FROM local_access_tokens AS t
-WHERE t.token_hash = ?`, hash[:]).Scan(&id, &name, &nameKey, &hashBytes, &hint, &source, &createdAt, &hasSecret)
+WHERE t.token_hash = ?`, hash[:]).Scan(&id, &name, &nameKey, &hashBytes, &hint, &source, &createdAt, &routingScope, &poolID, &revision, &hasSecret)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return storagecontract.AccessTokenMetadata{}, fmt.Errorf("%w: access token hash", storagecontract.ErrNotFound)
@@ -475,7 +478,7 @@ WHERE t.token_hash = ?`, hash[:]).Scan(&id, &name, &nameKey, &hashBytes, &hint, 
 		return storagecontract.AccessTokenMetadata{}, err
 	}
 	defer clear(hashBytes)
-	metadata, err := decodeAccessTokenMetadata(id, name, nameKey, hint, source, createdAt)
+	metadata, err := decodeAccessTokenMetadata(id, name, nameKey, hint, source, createdAt, routingScope, poolID, revision)
 	if err != nil {
 		return storagecontract.AccessTokenMetadata{}, err
 	}
@@ -598,6 +601,9 @@ func (store *Store) DeleteEndpoint(ctx context.Context, id contract.ServiceID, e
 }
 
 func (store *Store) Get(ctx context.Context, ref secretstore.Ref) ([]byte, error) {
+	if strings.HasPrefix(string(ref), "local://pool-proxy/") {
+		return store.getPoolProxyCredential(ctx, contract.AccountPoolID(strings.TrimPrefix(string(ref), "local://pool-proxy/")))
+	}
 	if strings.HasPrefix(string(ref), "local://builtin-tool/") {
 		return store.builtinCredential(ctx, ref, "get", nil)
 	}
@@ -735,6 +741,9 @@ func localServiceID(ref secretstore.Ref) (contract.ServiceID, error) {
 }
 
 func (store *Store) insertAccessTokenTx(ctx context.Context, transaction *sql.Tx, candidate storagecontract.NewAccessToken, source storagecontract.AccessTokenSource, now time.Time) (storagecontract.AccessTokenMetadata, error) {
+	if err := validateTokenPool(ctx, transaction, candidate.AccessTokenRouting); err != nil {
+		return storagecontract.AccessTokenMetadata{}, err
+	}
 	var count int
 	if err := transaction.QueryRowContext(ctx, `SELECT COUNT(*) FROM local_access_tokens`).Scan(&count); err != nil {
 		return storagecontract.AccessTokenMetadata{}, fmt.Errorf("count access tokens: %w", err)
@@ -746,8 +755,8 @@ func (store *Store) insertAccessTokenTx(ctx context.Context, transaction *sql.Tx
 	createdAt := now.UTC()
 	createdAtText := createdAt.Format(time.RFC3339Nano)
 	if _, err := transaction.ExecContext(ctx, `INSERT INTO local_access_tokens
-    (id, name, name_key, token_hash, token_hint, source, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    (id, name, name_key, token_hash, token_hint, source, created_at, routing_scope, pool_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		candidate.ID,
 		candidate.Name,
 		candidate.NameKey,
@@ -755,6 +764,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		candidate.Hint,
 		source,
 		createdAtText,
+		candidate.RoutingScope,
+		sql.NullString{String: string(candidate.PoolID), Valid: candidate.PoolID != ""},
 	); err != nil {
 		var exists int
 		scanErr := transaction.QueryRowContext(ctx, `SELECT EXISTS(
@@ -776,11 +787,13 @@ VALUES (?, ?, 1)`, candidate.ID, sealed); err != nil {
 		return storagecontract.AccessTokenMetadata{}, fmt.Errorf("insert access token secret: %w", err)
 	}
 	return storagecontract.AccessTokenMetadata{
-		ID:        candidate.ID,
-		Name:      candidate.Name,
-		Hint:      candidate.Hint,
-		Source:    source,
-		CreatedAt: createdAt,
+		ID:                 candidate.ID,
+		AccessTokenRouting: candidate.AccessTokenRouting,
+		RoutingRevision:    1,
+		Name:               candidate.Name,
+		Hint:               candidate.Hint,
+		Source:             source,
+		CreatedAt:          createdAt,
 	}, nil
 }
 
@@ -795,21 +808,26 @@ type storedAccessTokenMaterial struct {
 }
 
 func scanAccessTokenMetadata(scanner accessTokenScanner) (storagecontract.AccessTokenMetadata, error) {
-	var id, name, nameKey, hint, source, createdAt string
-	if err := scanner.Scan(&id, &name, &nameKey, &hint, &source, &createdAt); err != nil {
+	var id, name, nameKey, hint, source, createdAt, routingScope, poolID string
+	var revision int64
+	if err := scanner.Scan(&id, &name, &nameKey, &hint, &source, &createdAt, &routingScope, &poolID, &revision); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return storagecontract.AccessTokenMetadata{}, storagecontract.ErrNotFound
+		}
 		return storagecontract.AccessTokenMetadata{}, fmt.Errorf("scan access token metadata: %w", err)
 	}
-	return decodeAccessTokenMetadata(id, name, nameKey, hint, source, createdAt)
+	return decodeAccessTokenMetadata(id, name, nameKey, hint, source, createdAt, routingScope, poolID, revision)
 }
 
 func (store *Store) readAccessTokenMaterial(scanner accessTokenScanner) (storedAccessTokenMaterial, error) {
-	var id, name, nameKey, hint, source, createdAt string
+	var id, name, nameKey, hint, source, createdAt, routingScope, poolID string
+	var revision int64
 	var hashBytes, stored []byte
 	var sealed sql.NullBool
-	if err := scanner.Scan(&id, &name, &nameKey, &hashBytes, &hint, &source, &createdAt, &stored, &sealed); err != nil {
+	if err := scanner.Scan(&id, &name, &nameKey, &hashBytes, &hint, &source, &createdAt, &routingScope, &poolID, &revision, &stored, &sealed); err != nil {
 		return storedAccessTokenMaterial{}, err
 	}
-	metadata, err := decodeAccessTokenMetadata(id, name, nameKey, hint, source, createdAt)
+	metadata, err := decodeAccessTokenMetadata(id, name, nameKey, hint, source, createdAt, routingScope, poolID, revision)
 	if err != nil {
 		clear(stored)
 		return storedAccessTokenMaterial{}, err
@@ -843,7 +861,11 @@ func (store *Store) readAccessTokenMaterial(scanner accessTokenScanner) (storedA
 	return storedAccessTokenMaterial{metadata: metadata, hash: hash, value: value}, nil
 }
 
-func decodeAccessTokenMetadata(id, name, nameKey, hint, source, createdAt string) (storagecontract.AccessTokenMetadata, error) {
+func decodeAccessTokenMetadata(id, name, nameKey, hint, source, createdAt, routingScope, poolID string, revision int64) (storagecontract.AccessTokenMetadata, error) {
+	routing := contract.AccessTokenRouting{RoutingScope: contract.RoutingScope(routingScope), PoolID: contract.AccountPoolID(poolID)}
+	if err := routing.Validate(); err != nil || revision < 1 {
+		return storagecontract.AccessTokenMetadata{}, fmt.Errorf("%w: invalid access token routing scope", storagecontract.ErrInvalidRecord)
+	}
 	tokenID := contract.AccessTokenID(id)
 	if err := tokenID.Validate(); err != nil {
 		return storagecontract.AccessTokenMetadata{}, fmt.Errorf("%w: %v", storagecontract.ErrInvalidRecord, err)
@@ -864,15 +886,20 @@ func decodeAccessTokenMetadata(id, name, nameKey, hint, source, createdAt string
 		return storagecontract.AccessTokenMetadata{}, fmt.Errorf("%w: access token created_at", storagecontract.ErrInvalidRecord)
 	}
 	return storagecontract.AccessTokenMetadata{
-		ID:        tokenID,
-		Name:      canonicalName,
-		Hint:      hint,
-		Source:    tokenSource,
-		CreatedAt: parsedCreatedAt,
+		ID:                 tokenID,
+		AccessTokenRouting: routing,
+		RoutingRevision:    revision,
+		Name:               canonicalName,
+		Hint:               hint,
+		Source:             tokenSource,
+		CreatedAt:          parsedCreatedAt,
 	}, nil
 }
 
 func validateNewAccessToken(candidate storagecontract.NewAccessToken) error {
+	if err := candidate.AccessTokenRouting.Validate(); err != nil {
+		return err
+	}
 	if err := candidate.ID.Validate(); err != nil {
 		return err
 	}

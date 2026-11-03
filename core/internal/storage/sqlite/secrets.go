@@ -19,13 +19,14 @@ import (
 // SealPlaintextSecrets seals them at the next start; every write sets
 // sealed = 1, so reads refuse a sealed = 0 row.
 const (
-	serviceCredentialsTable      = "service_credentials"
-	accessTokenSecretsTable      = "local_access_token_secrets"
-	builtinToolCredentialsTable  = "builtin_tool_credentials"
-	serviceProxyCredentialsTable = "service_proxy_credentials"
-	subscriptionCredentialsTable = "subscription_credentials"
-	syncKeyMaterialTable         = "sync_key_material"
-	syncBaselineTable            = "sync_baseline"
+	serviceCredentialsTable          = "service_credentials"
+	accessTokenSecretsTable          = "local_access_token_secrets"
+	builtinToolCredentialsTable      = "builtin_tool_credentials"
+	serviceProxyCredentialsTable     = "service_proxy_credentials"
+	accountPoolProxyCredentialsTable = "account_pool_proxy_credentials"
+	subscriptionCredentialsTable     = "subscription_credentials"
+	syncKeyMaterialTable             = "sync_key_material"
+	syncBaselineTable                = "sync_baseline"
 
 	subscriptionRefPrefix = "local://subscription/"
 	// maxSubscriptionCredentialLen bounds one account's OAuth token JSON.
@@ -44,6 +45,7 @@ var secretColumns = []secretColumn{
 	{table: accessTokenSecretsTable, key: "token_id", value: "token_value", flagged: true},
 	{table: builtinToolCredentialsTable, key: "kind", value: "credential_value", flagged: true},
 	{table: serviceProxyCredentialsTable, key: "service_id", value: "credential_value", flagged: true},
+	{table: accountPoolProxyCredentialsTable, key: "pool_id", value: "credential_value", flagged: true},
 	{table: subscriptionCredentialsTable, key: "service_id", value: "credential_value"},
 	{table: syncKeyMaterialTable, key: "key", value: "credential_value", flagged: true},
 	{table: syncBaselineTable, key: "key", value: "payload_blob", flagged: true},

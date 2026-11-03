@@ -4440,6 +4440,8 @@ describe("RequestRecords", () => {
 
   it("opens on a target's provider, token, model and days and narrows by each", async () => {
     const token = {
+      routing_scope: "global" as const,
+      etag: '"token-routing-v1"',
       id: "token_01",
       name: "VS Code",
       hint: "astr_…K8Q2",
@@ -4566,6 +4568,8 @@ describe("RequestRecords", () => {
         <RequestRecords
           accessTokens={[
             {
+              routing_scope: "global" as const,
+              etag: '"token-routing-v1"',
               id: "token_01",
               name: "VS Code",
               hint: "astr_…K8Q2",
@@ -4630,6 +4634,8 @@ describe("RequestRecords", () => {
         <RequestRecords
           accessTokens={[
             {
+              routing_scope: "global" as const,
+              etag: '"token-routing-v1"',
               id: "token_01",
               name: "VS Code",
               hint: "astr_…K8Q2",
@@ -4678,6 +4684,8 @@ describe("RequestRecords", () => {
         <RequestRecords
           accessTokens={[
             {
+              routing_scope: "global" as const,
+              etag: '"token-routing-v1"',
               id: "token_01",
               name: "VS Code",
               hint: "astr_…K8Q2",
@@ -4685,6 +4693,8 @@ describe("RequestRecords", () => {
               created_at: "2026-07-24T10:30:00Z",
             },
             {
+              routing_scope: "global" as const,
+              etag: '"token-routing-v1"',
               id: "token_02",
               name: "Terminal",
               hint: "astr_…H5Z8",

@@ -411,7 +411,9 @@ function RouteInspector({
   const names: RequestServiceMap = service.id
     ? { [service.id]: { id: service.id, name: service.name }, ...services }
     : services;
-  const stepped = routingSteps(routes, record.routing_decision).length > 0;
+  const stepped =
+    !!record.routing_decision?.pool ||
+    routingSteps(routes, record.routing_decision).length > 0;
   return (
     <>
       <RoutingSteps

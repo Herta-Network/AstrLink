@@ -249,11 +249,11 @@ func newOfficialHarnessWith(t *testing.T, binary string) *officialHarness {
 		RequestRecords:   harness.records,
 		ConversionEngine: relaykitbridge.NewEngine(),
 		ClaudeOfficial:   official,
-		AccessTokenAuthenticator: AccessTokenAuthenticatorFunc(func(_ context.Context, token string) (contract.AccessTokenID, error) {
+		AccessTokenAuthenticator: AccessTokenAuthenticatorFunc(func(_ context.Context, token string) (AuthenticatedAccessToken, error) {
 			if token != "local-token" {
-				return "", fmt.Errorf("unknown token")
+				return AuthenticatedAccessToken{}, fmt.Errorf("unknown token")
 			}
-			return "token_local", nil
+			return testAccessTokenPrincipal("token_local"), nil
 		}),
 	})
 	harness.server = httptest.NewServer(handler)

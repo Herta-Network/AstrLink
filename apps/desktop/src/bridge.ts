@@ -1,3 +1,12 @@
+import {
+  parseAccountPool,
+  parseAccountPoolPage,
+  type AccountPool,
+  type AccountPoolInput,
+  type AccountPoolPatch,
+  type AccountPoolMemberInput,
+  type AccessTokenRouting,
+} from "./account-pool-model";
 import type { KiroAuthorization } from "./subscription-model";
 import { isWebEdition } from "./edition";
 import { webInvoke, RAW_CHANGED } from "./web-transport";
@@ -72,6 +81,8 @@ import {
   type SubscriptionRiskEvent,
 } from "./service-model";
 import {
+  parseAccessToken,
+  type AccessTokenSummary,
   parseAccessTokenCreateResult,
   parseAccessTokenCopied,
   parseAccessTokenPage,
@@ -1138,10 +1149,11 @@ export async function getPrivacySummary(
 
 export async function createAccessToken(
   name: string,
+  routing: AccessTokenRouting,
 ): Promise<AccessTokenCreateResult> {
   requireNativeBridge();
   return parseAccessTokenCreateResult(
-    await invoke<unknown>("create_access_token", { name }),
+    await invoke<unknown>("create_access_token", { name, routing }),
   );
 }
 
@@ -1639,5 +1651,76 @@ export async function runSync(): Promise<SyncStatus> {
   // gives it minutes rather than the usual control-request timeout.
   return parseSyncStatus(
     await invoke<unknown>("sync_config", { operation: "run" }),
+  );
+}
+
+export async function listAccountPools(): Promise<AccountPool[]> {
+  requireNativeBridge();
+  return parseAccountPoolPage(await invoke<unknown>("list_account_pools"));
+}
+export async function getAccountPool(poolId: string): Promise<AccountPool> {
+  requireNativeBridge();
+  return parseAccountPool(
+    await invoke<unknown>("get_account_pool", { poolId }),
+  );
+}
+export async function createAccountPool(
+  input: AccountPoolInput,
+): Promise<AccountPool> {
+  requireNativeBridge();
+  return parseAccountPool(
+    await invoke<unknown>("create_account_pool", { input }),
+  );
+}
+export async function updateAccountPool(
+  poolId: string,
+  patch: AccountPoolPatch,
+  etag: string,
+): Promise<AccountPool> {
+  requireNativeBridge();
+  return parseAccountPool(
+    await invoke<unknown>("update_account_pool", { poolId, patch, etag }),
+  );
+}
+export async function replaceAccountPoolMembers(
+  poolId: string,
+  members: AccountPoolMemberInput[],
+  etag: string,
+): Promise<AccountPool> {
+  requireNativeBridge();
+  return parseAccountPool(
+    await invoke<unknown>("replace_account_pool_members", {
+      poolId,
+      members,
+      etag,
+    }),
+  );
+}
+export async function deleteAccountPool(
+  poolId: string,
+  etag: string,
+): Promise<void> {
+  requireNativeBridge();
+  await invoke("delete_account_pool", { poolId, etag });
+}
+export async function probeAccountPoolQuota(
+  poolId: string,
+  serviceId: string,
+): Promise<void> {
+  requireNativeBridge();
+  await invoke("probe_account_pool_quota", { poolId, serviceId });
+}
+export async function updateAccessTokenRouting(
+  tokenId: string,
+  routing: AccessTokenRouting,
+  etag: string,
+): Promise<AccessTokenSummary> {
+  requireNativeBridge();
+  return parseAccessToken(
+    await invoke<unknown>("update_access_token_routing", {
+      tokenId,
+      routing,
+      etag,
+    }),
   );
 }

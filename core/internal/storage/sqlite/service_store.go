@@ -74,6 +74,7 @@ func (store *Store) CreateService(
 	if err = transaction.Commit(); err != nil {
 		return record, fmt.Errorf("commit service create: %w", err)
 	}
+	store.notifyAccountPools()
 	return storagecontract.ServiceRecord{Service: service, ETag: entityTag(document)}, nil
 }
 
@@ -103,7 +104,16 @@ func (store *Store) ListServices(ctx context.Context, options storagecontract.Se
 	if err != nil {
 		return storagecontract.ServicePage{}, err
 	}
-	rows, err := store.db.QueryContext(ctx, `SELECT id, document_json FROM services WHERE id > ? ORDER BY id`, after)
+	query := `SELECT id, document_json FROM services WHERE id > ?`
+	args := []any{after}
+	if options.PoolID != "" {
+		if err := options.PoolID.Validate(); err != nil {
+			return storagecontract.ServicePage{}, fmt.Errorf("%w: %v", storagecontract.ErrInvalidArgument, err)
+		}
+		query += ` AND EXISTS(SELECT 1 FROM account_pool_members m WHERE m.service_id = services.id AND m.pool_id = ?)`
+		args = append(args, options.PoolID)
+	}
+	rows, err := store.db.QueryContext(ctx, query+` ORDER BY id`, args...)
 	if err != nil {
 		return storagecontract.ServicePage{}, fmt.Errorf("list services: %w", err)
 	}
@@ -174,6 +184,15 @@ func (store *Store) UpdateService(
 	if service.Kind == contract.ServiceKindVertex && service.HTTP != nil && current.Service.HTTP.Auth.Scheme != service.HTTP.Auth.Scheme && !credential.Present {
 		return record, fmt.Errorf("%w: changing Vertex authentication requires a new credential", storagecontract.ErrInvalidArgument)
 	}
+	if service.Kind == contract.ServiceKindClaudeSubscription && service.Subscription != nil && service.Subscription.Mode == contract.SubscriptionModeOfficial {
+		var pooled bool
+		if err = transaction.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM account_pool_members WHERE service_id = ?)`, service.ID).Scan(&pooled); err != nil {
+			return record, err
+		}
+		if pooled {
+			return record, storagecontract.ErrPoolMembership
+		}
+	}
 	service.CreatedAt = current.Service.CreatedAt
 	service.UpdatedAt = store.now().UTC()
 	service, err = normalizeServiceModels(service)
@@ -218,6 +237,7 @@ func (store *Store) UpdateService(
 	if err = transaction.Commit(); err != nil {
 		return record, fmt.Errorf("commit service update: %w", err)
 	}
+	store.notifyAccountPools()
 	return storagecontract.ServiceRecord{Service: service, ETag: entityTag(document)}, nil
 }
 
@@ -246,12 +266,20 @@ func (store *Store) DeleteService(ctx context.Context, id contract.ServiceID, ex
 	if entityTag([]byte(document)) != expectedETag {
 		return fmt.Errorf("%w: service %q", storagecontract.ErrPrecondition, id)
 	}
+	var pooled bool
+	if err = transaction.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM account_pool_members WHERE service_id = ?)`, id).Scan(&pooled); err != nil {
+		return err
+	}
+	if pooled {
+		return storagecontract.ErrPoolMembership
+	}
 	if _, err = transaction.ExecContext(ctx, `DELETE FROM services WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("delete service: %w", err)
 	}
 	if err = transaction.Commit(); err != nil {
 		return fmt.Errorf("commit service delete: %w", err)
 	}
+	store.notifyAccountPools()
 	return nil
 }
 

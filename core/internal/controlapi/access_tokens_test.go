@@ -34,7 +34,10 @@ func (manager *fakeAccessTokenManager) List(context.Context) ([]accesstoken.Toke
 	return manager.tokens, manager.listErr
 }
 
-func (manager *fakeAccessTokenManager) Create(_ context.Context, name string) (accesstoken.CreatedToken, error) {
+func (manager *fakeAccessTokenManager) Create(_ context.Context, name string, routing contract.AccessTokenRouting) (accesstoken.CreatedToken, error) {
+	if err := routing.Validate(); err != nil {
+		return accesstoken.CreatedToken{}, storage.ErrInvalidArgument
+	}
 	manager.receivedName = name
 	return manager.created, manager.createErr
 }
@@ -98,7 +101,7 @@ func TestAccessTokenControlAPICRUDSeparatesMetadataFromExplicitSecrets(t *testin
 		t.Fatalf("list does not carry token sources: %s", body)
 	}
 
-	response = accessTokenRequest(t, handler, http.MethodPost, AccessTokensPath, "application/json", `{"name":" Primary "}`)
+	response = accessTokenRequest(t, handler, http.MethodPost, AccessTokensPath, "application/json", `{"routing_scope":"global","name":" Primary "}`)
 	if response.Code != http.StatusCreated {
 		t.Fatalf("create status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -157,9 +160,9 @@ func TestAccessTokenControlAPIRequiresAuthenticationAndStrictContracts(t *testin
 	}{
 		{name: "collection method", method: http.MethodPut, path: AccessTokensPath, status: http.StatusMethodNotAllowed, allow: "GET, POST"},
 		{name: "create media type", method: http.MethodPost, path: AccessTokensPath, contentType: "text/plain", body: `{}`, status: http.StatusUnsupportedMediaType},
-		{name: "create unknown field", method: http.MethodPost, path: AccessTokensPath, contentType: "application/json", body: `{"name":"x","secret":"forbidden"}`, status: http.StatusBadRequest},
+		{name: "create unknown field", method: http.MethodPost, path: AccessTokensPath, contentType: "application/json", body: `{"routing_scope":"global","name":"x","secret":"forbidden"}`, status: http.StatusBadRequest},
 		{name: "unexpected query", method: http.MethodGet, path: AccessTokensPath + "?limit=1", status: http.StatusBadRequest},
-		{name: "item method", method: http.MethodGet, path: AccessTokensPath + "/token_primary", status: http.StatusMethodNotAllowed, allow: http.MethodDelete},
+		{name: "item method", method: http.MethodPut, path: AccessTokensPath + "/token_primary", status: http.StatusMethodNotAllowed, allow: "GET, PATCH, DELETE"},
 		{name: "secret method", method: http.MethodDelete, path: AccessTokensPath + "/token_primary/secret", status: http.StatusMethodNotAllowed, allow: http.MethodGet},
 		{name: "invalid id", method: http.MethodDelete, path: AccessTokensPath + "/!", status: http.StatusBadRequest},
 		{name: "extra path", method: http.MethodGet, path: AccessTokensPath + "/token_primary/secret/extra", status: http.StatusNotFound},
@@ -189,12 +192,12 @@ func TestAccessTokenControlAPISanitizesManagerErrors(t *testing.T) {
 
 	manager.listErr = nil
 	manager.createErr = accesstoken.ErrInvalidName
-	response = accessTokenRequest(t, handler, http.MethodPost, AccessTokensPath, "application/json", `{"name":""}`)
+	response = accessTokenRequest(t, handler, http.MethodPost, AccessTokensPath, "application/json", `{"routing_scope":"global","name":""}`)
 	if response.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("invalid name status=%d body=%s", response.Code, response.Body.String())
 	}
 	manager.createErr = accesstoken.ErrTokenLimit
-	response = accessTokenRequest(t, handler, http.MethodPost, AccessTokensPath, "application/json", `{"name":"over limit"}`)
+	response = accessTokenRequest(t, handler, http.MethodPost, AccessTokensPath, "application/json", `{"routing_scope":"global","name":"over limit"}`)
 	if response.Code != http.StatusConflict {
 		t.Fatalf("limit status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -247,4 +250,25 @@ func accessTokenRequest(
 		t.Fatalf("Cache-Control=%q", response.Header().Get("Cache-Control"))
 	}
 	return response
+}
+
+func (manager *fakeAccessTokenManager) Get(_ context.Context, id contract.AccessTokenID) (accesstoken.Token, error) {
+	for _, token := range manager.tokens {
+		if token.ID == id {
+			return token, nil
+		}
+	}
+	return accesstoken.Token{}, storage.ErrNotFound
+}
+func (manager *fakeAccessTokenManager) UpdateRouting(ctx context.Context, id contract.AccessTokenID, routing contract.AccessTokenRouting, expected string) (accesstoken.Token, error) {
+	token, err := manager.Get(ctx, id)
+	if err != nil {
+		return token, err
+	}
+	if expected != token.ETag() {
+		return token, storage.ErrPrecondition
+	}
+	token.AccessTokenRouting = routing
+	token.RoutingRevision++
+	return token, nil
 }

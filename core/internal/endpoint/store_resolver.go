@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/QuantumNous/astrlink/core/contract"
+	"github.com/QuantumNous/astrlink/core/internal/accesstoken"
 	"github.com/QuantumNous/astrlink/core/internal/accountauth"
+	"github.com/QuantumNous/astrlink/core/internal/accountpool"
 	"github.com/QuantumNous/astrlink/core/internal/storage"
 )
 
@@ -161,11 +163,20 @@ func (resolver *StoreResolver) ResolveRankedCandidates(ctx context.Context, requ
 	candidates := rankCandidates(endpoints, request, resolver.subscriptionBaseURL, resolver.runtime, ranking)
 	if !request.Protocol.IsModelDiscovery() {
 		policy := settings.FailoverPolicy()
+		if poolScoped(ctx) {
+			policy.Enabled = true
+		}
 		for index := range candidates {
 			candidates[index].Failover = &policy
 		}
 	}
 	if len(candidates) == 0 {
+		if poolScoped(ctx) {
+			if len(endpoints) == 0 {
+				return nil, ranking, accountpool.ErrUnavailable
+			}
+			return nil, ranking, accountpool.ErrModel
+		}
 		if request.Service != "" {
 			return nil, ranking, resolver.pinnedServiceError(ctx, request.Service, ranking)
 		}
@@ -183,7 +194,7 @@ func (resolver *StoreResolver) ResolveRankedCandidates(ctx context.Context, requ
 	if err != nil {
 		return nil, ranking, err
 	}
-	if !request.Protocol.IsModelDiscovery() && !request.Continuation && !request.AllCandidates && !settings.AllowUnmatchedFailover {
+	if !poolScoped(ctx) && !request.Protocol.IsModelDiscovery() && !request.Continuation && !request.AllCandidates && !settings.AllowUnmatchedFailover {
 		candidates = candidates[:1]
 	}
 	return candidates, ranking, nil
@@ -238,10 +249,39 @@ func (resolver *StoreResolver) availableCandidates(candidates []Resolved, rankin
 // grouped into service packages ordered by those settings' strategies;
 // without, and for a pinned service, they keep the stored order.
 func (resolver *StoreResolver) readServices(ctx context.Context, model string, pinned contract.ServiceID, packages *contract.RoutingSettings) ([]contract.Service, []RankedService, error) {
+	pool, err := resolver.scopedPool(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	members := map[contract.ServiceID]contract.AccountPoolMember{}
+	if pool != nil {
+		for _, member := range pool.Members {
+			members[member.ServiceID] = member
+		}
+		if pinned != "" {
+			if _, found := members[pinned]; !found {
+				return nil, nil, accountpool.ErrScope
+			}
+		}
+	}
 	all := make(map[contract.ServiceID]contract.Service)
 	byID := make(map[contract.ServiceID]contract.Service)
 	excluded := make(map[contract.ServiceID]contract.RoutingSkipReason)
-	err := resolver.eachServiceFor(ctx, pinned, func(candidate contract.Service) error {
+	err = resolver.eachServiceFor(ctx, pinned, func(candidate contract.Service) error {
+		if pool != nil {
+			member, found := members[candidate.ID]
+			if !found {
+				return nil
+			}
+			if err := pool.Pool.ValidateMember(candidate); err != nil {
+				return accountpool.ErrUnavailable
+			}
+			if !member.Enabled {
+				all[candidate.ID] = candidate
+				excluded[candidate.ID] = contract.RoutingSkipDisabled
+				return nil
+			}
+		}
 		if err := candidate.Validate(); err != nil {
 			return fmt.Errorf("persisted endpoint failed validation: %w", err)
 		}
@@ -271,7 +311,9 @@ func (resolver *StoreResolver) readServices(ctx context.Context, model string, p
 	if err != nil {
 		return nil, nil, err
 	}
-	if packages != nil && pinned == "" {
+	if pool != nil {
+		before = func(a, b contract.ServiceID) bool { return a < b }
+	} else if packages != nil && pinned == "" {
 		before = resolver.packageOrder(all, before, *packages)
 	}
 	sort.Slice(endpoints, func(left, right int) bool {
@@ -338,6 +380,9 @@ func (resolver *StoreResolver) eachServiceFor(ctx context.Context, id contract.S
 // eachService visits every persisted service, page by page.
 func (resolver *StoreResolver) eachService(ctx context.Context, visit func(contract.Service) error) error {
 	options := storage.ServiceListOptions{Limit: 200}
+	if principal, ok := accesstoken.PrincipalFromContext(ctx); ok && principal.RoutingScope == contract.RoutingScopePool {
+		options.PoolID = principal.PoolID
+	}
 	seenCursors := make(map[string]struct{})
 	for {
 		page, err := resolver.reader.ListServices(ctx, options)

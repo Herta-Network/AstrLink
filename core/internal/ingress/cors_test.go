@@ -27,9 +27,9 @@ func TestInferencePreflightDoesNotAuthenticateRouteOrRecord(t *testing.T) {
 			t.Fatal("preflight authorized an upstream")
 			return nil, nil
 		}),
-		AccessTokenAuthenticator: AccessTokenAuthenticatorFunc(func(context.Context, string) (contract.AccessTokenID, error) {
+		AccessTokenAuthenticator: AccessTokenAuthenticatorFunc(func(context.Context, string) (AuthenticatedAccessToken, error) {
 			t.Fatal("preflight authenticated an API token")
-			return "", nil
+			return AuthenticatedAccessToken{}, nil
 		}),
 	})
 	if err != nil {
@@ -102,11 +102,11 @@ func TestBrowserInferenceUsesAPITokenAndOwnsCORS(t *testing.T) {
 				Authorizer: authorizerFunc(func(context.Context, contract.Endpoint) (http.Header, error) {
 					return http.Header{"Authorization": {"Bearer upstream-secret"}}, nil
 				}),
-				AccessTokenAuthenticator: AccessTokenAuthenticatorFunc(func(_ context.Context, presented string) (contract.AccessTokenID, error) {
+				AccessTokenAuthenticator: AccessTokenAuthenticatorFunc(func(_ context.Context, presented string) (AuthenticatedAccessToken, error) {
 					if presented == token {
-						return "token_primary", nil
+						return testAccessTokenPrincipal("token_primary"), nil
 					}
-					return "", errors.New("invalid token")
+					return AuthenticatedAccessToken{}, errors.New("invalid token")
 				}),
 				Forwarder: transport.New(roundTripFunc(func(request *http.Request) (*http.Response, error) {
 					hits++

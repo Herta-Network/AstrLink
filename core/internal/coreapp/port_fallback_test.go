@@ -37,8 +37,8 @@ func TestOccupiedInferencePortFallsBackAndKeepsProductionHostGate(t *testing.T) 
 					AllowedHost: address,
 					Resolver:    endpoint.UnavailableResolver{},
 					Authorizer:  endpoint.NewSecretAuthorizer(nil),
-					AccessTokenAuthenticator: ingress.AccessTokenAuthenticatorFunc(func(context.Context, string) (contract.AccessTokenID, error) {
-						return "", errors.New("unauthenticated")
+					AccessTokenAuthenticator: ingress.AccessTokenAuthenticatorFunc(func(context.Context, string) (ingress.AuthenticatedAccessToken, error) {
+						return ingress.AuthenticatedAccessToken{}, errors.New("unauthenticated")
 					}),
 				})
 			},

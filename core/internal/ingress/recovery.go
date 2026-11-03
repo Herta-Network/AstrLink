@@ -15,20 +15,22 @@ import (
 // recoverySchedule is request-local. It is the only owner of retry quotas and
 // next-target ordering; transports and protocol converters never retry.
 type recoverySchedule struct {
-	nextRepair bool
-	repairing  bool
-	candidates []endpoint.Resolved
-	policy     contract.FailoverPolicy
-	selected   []bool
-	maySwitch  bool
-	counts     []int // Ordinary attempts only; repairs still count toward total.
-	retryable  []bool
-	excluded   []bool
-	readyAt    []time.Time
-	total      int
-	nextIndex  int
-	stopReason string
-	delay      time.Duration
+	selectCandidate func(context.Context, int) (int, error)
+	admissionError  error
+	nextRepair      bool
+	repairing       bool
+	candidates      []endpoint.Resolved
+	policy          contract.FailoverPolicy
+	selected        []bool
+	maySwitch       bool
+	counts          []int // Ordinary attempts only; repairs still count toward total.
+	retryable       []bool
+	excluded        []bool
+	readyAt         []time.Time
+	total           int
+	nextIndex       int
+	stopReason      string
+	delay           time.Duration
 }
 
 func newRecoverySchedule(candidates []endpoint.Resolved, replayable bool) *recoverySchedule {
@@ -76,6 +78,15 @@ func (schedule *recoverySchedule) next(ctx context.Context) (int, bool) {
 	if ctx.Err() != nil {
 		schedule.stopReason = "cancelled"
 		return 0, false
+	}
+	if schedule.selectCandidate != nil {
+		var err error
+		index, err = schedule.selectCandidate(ctx, index)
+		if err != nil {
+			schedule.admissionError = err
+			schedule.stopReason = "admission_failed"
+			return 0, false
+		}
 	}
 	schedule.repairing = schedule.nextRepair
 	schedule.nextRepair = false

@@ -33,10 +33,11 @@ func (settings *ChannelStickiness) UnmarshalJSON(data []byte) error {
 }
 
 type ChannelBindingScope struct {
-	SessionID SessionID  `json:"session_id"`
-	Principal string     `json:"local_access_token_id"`
-	Protocol  ProtocolID `json:"protocol"`
-	Model     string     `json:"model"`
+	PoolID    AccountPoolID `json:"pool_id,omitempty"`
+	SessionID SessionID     `json:"session_id"`
+	Principal string        `json:"local_access_token_id"`
+	Protocol  ProtocolID    `json:"protocol"`
+	Model     string        `json:"model"`
 }
 
 type ChannelBinding struct {

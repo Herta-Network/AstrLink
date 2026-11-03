@@ -2,6 +2,9 @@ package storage
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/QuantumNous/astrlink/core/contract"
@@ -24,11 +27,18 @@ func (source AccessTokenSource) Valid() bool {
 // contains neither the bearer value nor its SHA-256 digest. Source tells the
 // bootstrap token this installation issued apart from the ones a user created.
 type AccessTokenMetadata struct {
-	ID        contract.AccessTokenID `json:"id"`
-	Name      string                 `json:"name"`
-	Hint      string                 `json:"hint"`
-	Source    AccessTokenSource      `json:"source"`
-	CreatedAt time.Time              `json:"created_at"`
+	contract.AccessTokenRouting
+	RoutingRevision int64                  `json:"routing_revision"`
+	ID              contract.AccessTokenID `json:"id"`
+	Name            string                 `json:"name"`
+	Hint            string                 `json:"hint"`
+	Source          AccessTokenSource      `json:"source"`
+	CreatedAt       time.Time              `json:"created_at"`
+}
+
+func (token AccessTokenMetadata) ETag() string {
+	raw, _ := json.Marshal(token)
+	return fmt.Sprintf(`"%x"`, sha256.Sum256(raw))
 }
 
 type AccessTokenHash [32]byte
@@ -37,6 +47,7 @@ type AccessTokenHash [32]byte
 // boundary. Store implementations must persist Value separately from metadata
 // and never return Hash or Value from list operations.
 type NewAccessToken struct {
+	contract.AccessTokenRouting
 	ID      contract.AccessTokenID
 	Name    string
 	NameKey string
@@ -52,4 +63,11 @@ type AccessTokenStore interface {
 	RevealAccessToken(context.Context, contract.AccessTokenID) (string, error)
 	DeleteAccessToken(context.Context, contract.AccessTokenID) error
 	FindAccessTokenByHash(context.Context, AccessTokenHash) (AccessTokenMetadata, error)
+}
+
+// AccessTokenRoutingStore owns conditional scope changes separately from
+// authentication and secret retrieval.
+type AccessTokenRoutingStore interface {
+	GetAccessToken(context.Context, contract.AccessTokenID) (AccessTokenMetadata, error)
+	UpdateAccessTokenRouting(context.Context, contract.AccessTokenID, contract.AccessTokenRouting, string) (AccessTokenMetadata, error)
 }

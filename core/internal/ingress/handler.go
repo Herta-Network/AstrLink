@@ -23,7 +23,9 @@ import (
 	"time"
 
 	"github.com/QuantumNous/astrlink/core/contract"
+	"github.com/QuantumNous/astrlink/core/internal/accesstoken"
 	"github.com/QuantumNous/astrlink/core/internal/accountauth"
+	"github.com/QuantumNous/astrlink/core/internal/accountpool"
 	"github.com/QuantumNous/astrlink/core/internal/autoclassifier"
 	"github.com/QuantumNous/astrlink/core/internal/autotext"
 	"github.com/QuantumNous/astrlink/core/internal/builtintools"
@@ -33,6 +35,7 @@ import (
 	"github.com/QuantumNous/astrlink/core/internal/privacy"
 	"github.com/QuantumNous/astrlink/core/internal/relaykitbridge"
 	"github.com/QuantumNous/astrlink/core/internal/secretstore"
+	"github.com/QuantumNous/astrlink/core/internal/storage"
 	"github.com/QuantumNous/astrlink/core/internal/transport"
 )
 
@@ -41,19 +44,23 @@ type Forwarder interface {
 }
 
 // AccessTokenAuthenticator resolves a presented local inference credential to
-// its stable persistent identifier. Implementations must fail closed when the
+// its persistent identity and explicit routing scope. Implementations fail closed when the
 // token is missing, deleted, or the persisted token state cannot be trusted.
 type AccessTokenAuthenticator interface {
-	AuthenticateAccessToken(context.Context, string) (contract.AccessTokenID, error)
+	AuthenticateAccessToken(context.Context, string) (AuthenticatedAccessToken, error)
 }
 
-type AccessTokenAuthenticatorFunc func(context.Context, string) (contract.AccessTokenID, error)
+type AuthenticatedAccessToken = accesstoken.Token
 
-func (function AccessTokenAuthenticatorFunc) AuthenticateAccessToken(ctx context.Context, token string) (contract.AccessTokenID, error) {
+type AccessTokenAuthenticatorFunc func(context.Context, string) (AuthenticatedAccessToken, error)
+
+func (function AccessTokenAuthenticatorFunc) AuthenticateAccessToken(ctx context.Context, token string) (AuthenticatedAccessToken, error) {
 	return function(ctx, token)
 }
 
 type Dependencies struct {
+	PoolRuntime              *accountpool.Runtime
+	AccountPools             storage.AccountPoolStore
 	ProxyCredentials         secretstore.SecretStore
 	Resolver                 endpoint.Resolver
 	Authorizer               endpoint.Authorizer
@@ -116,6 +123,8 @@ func (function PolicyWarningReporterFunc) ReportPolicyWarning(warning privacy.Wa
 }
 
 type Handler struct {
+	poolRuntime              *accountpool.Runtime
+	accountPools             storage.AccountPoolStore
 	builtinStates            builtintools.Store
 	searchRefs               searchRefStore
 	codexTurns               codexTurnStore
@@ -270,6 +279,9 @@ func validateProductionDependencies(dependencies Dependencies) error {
 	if dependencies.AccessTokenAuthenticator == nil {
 		return fmt.Errorf("production access token authenticator is required")
 	}
+	if dependencies.AccountPools != nil && dependencies.PoolRuntime == nil {
+		return fmt.Errorf("account pool admission runtime is required")
+	}
 	return nil
 }
 
@@ -291,6 +303,8 @@ func NewWithDependencies(dependencies Dependencies) *Handler {
 		claudeOfficialForwarder = transport.New(dependencies.ClaudeOfficial)
 	}
 	return &Handler{
+		poolRuntime:    dependencies.PoolRuntime,
+		accountPools:   dependencies.AccountPools,
 		claudeOfficial: dependencies.ClaudeOfficial, claudeOfficialForwarder: claudeOfficialForwarder,
 		proxyCredentials: dependencies.ProxyCredentials,
 		resolver:         dependencies.Resolver, authorizer: dependencies.Authorizer, forwarder: dependencies.Forwarder,
@@ -335,6 +349,16 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		return
 	}
 	if builtinInternalFrom(request.Context()) == nil && !handler.allowInferenceBoundary(writer, request) {
+		return
+	}
+	poolContext, poolErr := handler.bindRequestPool(request.Context())
+	request = request.WithContext(poolContext)
+	if poolErr != nil {
+		var detail *accountpool.Error
+		if !errors.As(poolErr, &detail) {
+			detail = accountpool.ErrUnavailable
+		}
+		handler.writeBoundaryError(writer, request, detail.Status, detail.Code, detail.Message)
 		return
 	}
 	if isResponsesWebSocket(request) {
@@ -462,7 +486,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	// A named provider serves every turn of the session, so a binding has
 	// nothing to choose.
 	if pinned == "" {
-		session.channelBinding = handler.prepareChannelBinding(session, routingSettings, routingSettingsLoaded)
+		session.channelBinding = handler.prepareChannelBinding(request.Context(), session, routingSettings, routingSettingsLoaded)
 	}
 	candidates, err := handler.resolveCandidates(request.Context(), endpoint.ResolveRequest{
 		Protocol:      classified.Protocol,
@@ -508,6 +532,16 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	}
 	candidates, err = handler.bindResponseAffinity(request.Context(), classified, candidates)
 	if err != nil {
+		var poolError *accountpool.Error
+		if errors.As(err, &poolError) {
+			handler.writeResolveError(outWriter, request, classified, err)
+			return
+		}
+		if poolForRequest(request.Context()) != nil {
+			handler.writeResolveError(outWriter, request, classified, accountpool.ErrAffinity)
+			return
+		}
+
 		writeInferenceError(outWriter, http.StatusConflict, "response_affinity_unavailable", err.Error(), false, nil)
 		session.noteFailed(errorSummaryFromInference("response_affinity_unavailable", err.Error(), false))
 		return
@@ -925,13 +959,13 @@ func (handler *Handler) allowInferenceBoundary(writer http.ResponseWriter, reque
 			handler.writeBoundaryError(writer, request, http.StatusUnauthorized, "invalid_access_token", "a valid local access token is required")
 			return false
 		}
-		tokenID, err := handler.accessTokenAuthenticator.AuthenticateAccessToken(request.Context(), token)
-		if err != nil || tokenID == "" {
+		principal, err := handler.accessTokenAuthenticator.AuthenticateAccessToken(request.Context(), token)
+		if err != nil || principal.ID == "" || principal.AccessTokenRouting.Validate() != nil || principal.RoutingRevision < 1 {
 			writer.Header().Set("WWW-Authenticate", `Bearer realm="astrlink-inference"`)
 			handler.writeBoundaryError(writer, request, http.StatusUnauthorized, "invalid_access_token", "a valid local access token is required")
 			return false
 		}
-		*request = *request.WithContext(context.WithValue(request.Context(), accessTokenIDContextKey{}, tokenID))
+		*request = *request.WithContext(accesstoken.WithPrincipal(context.WithValue(request.Context(), accessTokenIDContextKey{}, principal.ID), principal))
 	}
 	route, _, known := matchProtocolRoute(request.URL.Path)
 	if !known || route.method != http.MethodPost || request.Method != http.MethodPost {
@@ -967,6 +1001,13 @@ func (handler *Handler) loadAuditSettings(ctx context.Context) contract.AuditSet
 func (handler *Handler) startRecordSession(request *http.Request, classified Request) *recordSession {
 	accessTokenID, _ := AccessTokenIDFromContext(request.Context())
 	session := newRecordSession(classified, accessTokenID, handler.loadAuditSettings(request.Context()))
+	if principal, ok := accesstoken.PrincipalFromContext(request.Context()); ok && principal.RoutingScope == contract.RoutingScopePool {
+		name := ""
+		if pool := poolForRequest(request.Context()); pool != nil {
+			name = pool.Pool.Name
+		}
+		session.notePool(principal.PoolID, name, principal.RoutingScope, 0)
+	}
 	session.clientType = detectClientType(request.Header)
 	session.privacyGated = handler.privacyFilter != nil
 	session.bindPersistence(handler.requestRecords, handler.auditBlobs, handler.recordLogger)
@@ -1152,6 +1193,17 @@ func (handler *Handler) writeResolveError(writer http.ResponseWriter, request *h
 	session := recordSessionFromContext(request.Context())
 	var capabilityErr *endpoint.CapabilityUnavailableError
 	var pinnedErr *endpoint.PinnedServiceError
+	var poolErr *accountpool.Error
+	if errors.As(err, &poolErr) {
+		var exhausted *accountpool.QuotaExhausted
+		if errors.As(err, &exhausted) && exhausted.RetryAt.After(time.Now()) {
+			seconds := int64(time.Until(exhausted.RetryAt).Round(time.Second) / time.Second)
+			writer.Header().Set("Retry-After", strconv.FormatInt(max(seconds, 1), 10))
+		}
+		writeInferenceError(writer, poolErr.Status, poolErr.Code, poolErr.Message, poolErr.Status == 429 || poolErr.Status == 503, nil)
+		session.noteFailed(errorSummaryFromInference(poolErr.Code, poolErr.Message, poolErr.Status == 429 || poolErr.Status == 503))
+		return
+	}
 	switch {
 	case errors.As(err, &pinnedErr):
 		message := pinnedServiceMessage(pinnedErr, classified)

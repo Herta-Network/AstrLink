@@ -747,7 +747,7 @@ func (engine *Engine) syncOnce(ctx context.Context) error {
 		// Base first, remote last: a kind this device does not write has to
 		// carry the remote's copy, not the one this device last synced.
 		carryThrough(merged, kinds, base, remoteDoc)
-		merged.Version = syncDocumentVersion(scope.Tokens, base, hasBase, remoteDoc, exists)
+		merged.Version = syncDocumentVersion(scope.Tokens || len(merged.Entities[KindAccountPool]) > 0, base, hasBase, remoteDoc, exists)
 		pruneOrphans(&merged)
 		if err := engine.apply(ctx, merged, scope); err != nil {
 			return err
@@ -837,7 +837,7 @@ func (engine *Engine) forcePush(
 		// out-of-scope tokens or downgrade a remote that has just become v2.
 		published := restrict(local, kinds)
 		carryThrough(published, kinds, sources...)
-		published.Version = syncDocumentVersion(state.Config.Scope.Tokens, base, hasBase, remoteDoc, exists)
+		published.Version = syncDocumentVersion(state.Config.Scope.Tokens || len(published.Entities[KindAccountPool]) > 0, base, hasBase, remoteDoc, exists)
 		published.Revision = base.Revision + 1
 		pruneOrphans(&published)
 		encoded, err := published.Encode()
@@ -914,14 +914,14 @@ func (engine *Engine) finish(
 }
 
 // A scope without tokens can still exchange v1 packages with older devices.
-// Once tokens participate, v2 must persist even after they are deleted or the
+// Once scoped tokens or pools participate, v3 persists after deletion or when the
 // group is disabled, so an old writer cannot silently remove the group. Also
-// upgrade token entities written by builds that put them in a v1 package.
+// upgrade global tokens from the two previously published payload versions.
 func syncDocumentVersion(tokens bool, base Document, hasBase bool, remoteDoc Document, exists bool) int {
-	requiresV2 := func(document Document) bool {
-		return document.Version >= PackageVersion || len(document.Entities[KindAccessToken]) > 0
+	requiresV3 := func(document Document) bool {
+		return document.Version >= 2 || len(document.Entities[KindAccessToken]) > 0 || len(document.Entities[KindAccountPool]) > 0
 	}
-	if tokens || (hasBase && requiresV2(base)) || (exists && requiresV2(remoteDoc)) {
+	if tokens || (hasBase && requiresV3(base)) || (exists && requiresV3(remoteDoc)) {
 		return PackageVersion
 	}
 	return legacyPackageVersion
