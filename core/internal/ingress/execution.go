@@ -336,6 +336,7 @@ func (handler *Handler) executeCandidatesWithTest(
 		// conversion belongs to this attempt only: its state must reach this
 		// attempt's response conversion and never a retry's.
 		var conversion relaykitbridge.ConvertRequestOutput
+		var sourceCacheLosses []contract.ConversionDiagnostic
 		if plan.UsesRelayKit() {
 			convertedInput, readErr := io.ReadAll(attemptRequest.Body)
 			if readErr != nil {
@@ -348,6 +349,7 @@ func (handler *Handler) executeCandidatesWithTest(
 			_ = attemptRequest.Body.Close()
 			var kiroDocuments providerapi.KiroDocumentConversion
 			if candidate.Service.Kind == contract.ServiceKindKiroSubscription {
+				sourceCacheLosses = providerapi.KiroSourceCacheDiagnostics(convertedInput)
 				var documentErr error
 				convertedInput, kiroDocuments, documentErr = providerapi.PrepareKiroDocuments(plan.InputProtocol, convertedInput)
 				if documentErr != nil {
@@ -659,11 +661,18 @@ func (handler *Handler) executeCandidatesWithTest(
 			BaseURL:        baseURL,
 			RequestHeaders: headers,
 		}
+		if candidate.Service.Kind == contract.ServiceKindKiroSubscription {
+			caller, _ := AccessTokenIDFromContext(request.Context())
+			forwardTarget.Kiro = &transport.KiroAttempt{Resolve: handler.resolveKiro, Model: upstreamModel, Auxiliary: haiku, Caller: caller}
+		}
 		attemptStarted := false
 		forwardTarget.ObserveOutbound = func(outbound *http.Request) {
 			attemptStarted = true
 			schedule.started(candidateIndex)
 			replayLastHTTP = nil
+			if k := forwardTarget.Kiro; k != nil && relayWriter != nil {
+				relayWriter.kiroExchange = k.Exchange
+			}
 			if recordSession != nil {
 				recordSession.beginNetworkAttempt(
 					request.Context(),
@@ -673,11 +682,30 @@ func (handler *Handler) executeCandidatesWithTest(
 					handler.requestRecords,
 					handler.recordLogger,
 				)
+				if k := forwardTarget.Kiro; k != nil {
+					recordSession.kiroExchange = k.Exchange
+				}
 				// Rewrites go first so a long conversion report cannot crowd
 				// them out of the diagnostics limit.
 				recordSession.noteGatewayRewrites(reasoning, identity)
 				recordSession.noteConversionDiagnostics(contract.ConversionDiagnosticPhaseRequest, conversion.Diagnostics)
 				recordSession.noteConversionDiagnostics(contract.ConversionDiagnosticPhaseRequest, officialDiagnostics)
+				if k := forwardTarget.Kiro; k != nil && k.Exchange != nil {
+					for _, d := range sourceCacheLosses {
+						recordSession.noteDiagnostic(d)
+					}
+					for _, d := range k.Exchange.Diagnostics(contract.ConversionDiagnosticPhaseRequest) {
+						recordSession.noteDiagnostic(d)
+					}
+					if k.Exchange.OutputLimitOmitted {
+						recordSession.noteDiagnostic(contract.ConversionDiagnostic{
+							Phase: contract.ConversionDiagnosticPhaseRequest, Severity: contract.ConversionDiagnosticError, Code: "kiro_output_limit_unavailable", Path: "max_tokens", Message: "This Kiro endpoint and model do not advertise a per-request output limit. The provider controls the output budget.",
+						})
+					}
+					if k.Exchange.ToolResultStatusOmitted {
+						recordSession.noteDiagnostic(contract.ConversionDiagnostic{Phase: contract.ConversionDiagnosticPhaseRequest, Severity: contract.ConversionDiagnosticError, Code: "kiro_tool_result_status_unavailable", Path: "messages", Message: "Kiro CreateResponse carries tool output without a separate error status."})
+					}
+				}
 				recordSession.noteGatewayReasoning(reasoning)
 				recordSession.observeOutboundCapture(outbound)
 			}
@@ -933,6 +961,11 @@ func (handler *Handler) executeCandidatesWithTest(
 			if finishErr := relayWriter.Finish(); finishErr != nil {
 				forwardErr = transport.NewResponseError(finishErr)
 				relayConversionFailed = !downstream.Committed()
+			}
+		}
+		if k := forwardTarget.Kiro; k != nil && k.Exchange != nil && attemptStarted {
+			for _, d := range k.Exchange.Diagnostics(contract.ConversionDiagnosticPhaseResponse) {
+				recordSession.noteDiagnostic(d)
 			}
 		}
 		if relayWriter != nil && attemptStarted {

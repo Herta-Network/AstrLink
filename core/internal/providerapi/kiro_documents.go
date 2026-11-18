@@ -116,28 +116,31 @@ func uniqueKiroDocumentNames(docs []kiroDocument) {
 	}
 }
 
-func kiroToolResultContent(content ojson.Result, user *kiroUser) (string, error) {
+func kiroToolResultContent(content ojson.Result, user *kiroUser) ([]map[string]string, error) {
 	if !content.Exists() || content.Type == ojson.String {
-		return content.String(), nil
+		return []map[string]string{{"text": content.String()}}, nil
 	}
 	if !content.IsArray() {
-		return "", fmt.Errorf("invalid Kiro tool result content")
+		return nil, fmt.Errorf("invalid Kiro tool result content")
 	}
-	var parts []string
+	parts := make([]map[string]string, 0)
 	for _, block := range content.Array() {
 		switch block.Get("type").String() {
 		case "text":
-			parts = append(parts, block.Get("text").String())
+			if block.Get("text").Type != ojson.String {
+				return nil, fmt.Errorf("invalid Kiro tool result text")
+			}
+			parts = append(parts, map[string]string{"text": block.Get("text").String()})
 		case "document", "file", "input_file":
 			doc, err := kiroDocumentBlock(block)
 			if err != nil {
-				return "", err
+				return nil, err
 			}
 			user.Documents = append(user.Documents, doc)
-			parts = append(parts, "[Tool returned a document; the document is attached to this message.]")
+			parts = append(parts, map[string]string{"text": "[Tool returned a document; the document is attached to this message.]"})
 		default:
-			return "", fmt.Errorf("unsupported Kiro tool result content block")
+			return nil, fmt.Errorf("unsupported Kiro tool result content block")
 		}
 	}
-	return strings.Join(parts, "\n"), nil
+	return parts, nil
 }

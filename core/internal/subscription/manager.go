@@ -52,6 +52,8 @@ type Manager struct {
 	kiroSessions            *accountauth.SessionManager
 	kiroTokens              *accountauth.TokenSource
 	kiroConfig              accountauth.OAuthConfig
+	kiroCatalog             kiroCache[map[string]kiroCatalogModel]
+	kiroFeatures            kiroCache[kiroFeatures]
 	provider                *CodexProvider
 	now                     func() time.Time
 	newID                   func() (contract.SubscriptionAccountID, error)

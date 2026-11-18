@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/QuantumNous/astrlink/core/contract"
 	"github.com/MoeForge/moego/ojson"
+	"github.com/QuantumNous/astrlink/core/contract"
 )
 
 // KiroDocumentConversion keeps files outside RelayKit's narrower Anthropic

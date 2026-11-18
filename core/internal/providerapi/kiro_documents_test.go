@@ -19,7 +19,7 @@ func TestKiroInlineDocumentFormatsPreserveBytes(t *testing.T) {
 			payload := map[string]any{"model": "m", "messages": []any{map[string]any{"role": "user", "content": []any{map[string]any{"type": "document", "title": "report." + format, "source": map[string]any{"type": "base64", "media_type": media, "data": encoded}}}}}}
 			raw, _ := json.Marshal(payload)
 			req := httptest.NewRequest("POST", "https://example.test/v1/messages", strings.NewReader(string(raw)))
-			if _, err := KiroRequest(req, "", ""); err != nil {
+			if _, err := KiroRequest(req, "", "", KiroRuntime{}); err != nil {
 				t.Fatal(err)
 			}
 			out, _ := io.ReadAll(req.Body)
@@ -32,9 +32,9 @@ func TestKiroInlineDocumentFormatsPreserveBytes(t *testing.T) {
 }
 
 func TestKiroDocumentsInToolResultsAndDuplicateNames(t *testing.T) {
-	body := `{"model":"m","messages":[{"role":"user","content":"read"},{"role":"assistant","content":[{"type":"tool_use","id":"call_1","name":"read","input":{}}]},{"role":"user","content":[{"type":"document","title":"a.txt","source":{"type":"text","data":"first"}},{"type":"tool_result","tool_use_id":"call_1","content":[{"type":"text","text":"tool text"},{"type":"document","title":"a.txt","source":{"type":"text","data":"second"}}]}]}]}`
+	body := `{"model":"m","tools":[{"name":"read","input_schema":{"type":"object"}}],"messages":[{"role":"user","content":"read"},{"role":"assistant","content":[{"type":"tool_use","id":"call_1","name":"read","input":{}}]},{"role":"user","content":[{"type":"document","title":"a.txt","source":{"type":"text","data":"first"}},{"type":"tool_result","tool_use_id":"call_1","content":[{"type":"text","text":"tool text"},{"type":"document","title":"a.txt","source":{"type":"text","data":"second"}}]}]}]}`
 	req := httptest.NewRequest("POST", "https://example.test/v1/messages", strings.NewReader(body))
-	if _, err := KiroRequest(req, "", ""); err != nil {
+	if _, err := KiroRequest(req, "", "", KiroRuntime{}); err != nil {
 		t.Fatal(err)
 	}
 	out, _ := io.ReadAll(req.Body)
@@ -83,7 +83,7 @@ func TestKiroForcedToolChoiceCompatibility(t *testing.T) {
 	} {
 		body := `{"model":"m","tools":` + tools + `,"tool_choice":` + test.choice + `,"messages":[{"role":"user","content":"original prompt"}]}`
 		req := httptest.NewRequest("POST", "https://example.test/v1/messages", strings.NewReader(body))
-		if _, err := KiroRequest(req, "", ""); err != nil {
+		if _, err := KiroRequest(req, "", "", KiroRuntime{}); err != nil {
 			t.Fatal(err)
 		}
 		raw, _ := io.ReadAll(req.Body)
@@ -100,7 +100,7 @@ func TestKiroForcedToolChoiceCompatibility(t *testing.T) {
 	}
 	for _, choice := range []string{`{"type":"tool","name":"missing"}`, `{"type":"tool"}`, `{"type":"invalid"}`} {
 		req := httptest.NewRequest("POST", "https://example.test/v1/messages", strings.NewReader(`{"model":"m","tools":`+tools+`,"tool_choice":`+choice+`,"messages":[{"role":"user","content":"hello"}]}`))
-		if _, err := KiroRequest(req, "", ""); err == nil {
+		if _, err := KiroRequest(req, "", "", KiroRuntime{}); err == nil {
 			t.Fatalf("invalid choice accepted: %s", choice)
 		}
 	}
@@ -115,7 +115,7 @@ func TestKiroDocumentConversationAnchorSurvivesLaterTurns(t *testing.T) {
 		}
 		raw, _ := json.Marshal(map[string]any{"model": "m", "messages": messages})
 		req := httptest.NewRequest("POST", "https://example.test/v1/messages", strings.NewReader(string(raw)))
-		if _, err := KiroRequest(req, "", "account-scope"); err != nil {
+		if _, err := KiroRequest(req, "", "account-scope", KiroRuntime{}); err != nil {
 			t.Fatal(err)
 		}
 		out, _ := io.ReadAll(req.Body)

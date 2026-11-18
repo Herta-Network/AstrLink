@@ -476,3 +476,22 @@ func TestGeminiTotalsCanBePricedWithoutAudioDetails(t *testing.T) {
 		t.Fatalf("value=%+v error=%v", value, err)
 	}
 }
+
+func TestAnthropicStreamDoesNotBillAbsentOutputAsZero(t *testing.T) {
+	for _, tt := range []struct {
+		usage    string
+		complete bool
+	}{
+		{`{"input_tokens":0,"cache_read_input_tokens":0}`, false},
+		{`{"cache_read_input_tokens":12,"output_tokens":0}`, false},
+		{`{"input_tokens":0,"output_tokens":0}`, true},
+	} {
+		scanner := newUsageScanner(contract.ProtocolAnthropicMessages, true)
+		scanner.observe([]byte("data: " + `{"type":"message_start","message":{"usage":{}}}` + "\n\n"))
+		scanner.observe([]byte("data: " + `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":` + tt.usage + `}` + "\n\n"))
+		scanner.observe([]byte("data: " + `{"type":"message_stop"}` + "\n\n"))
+		if got := scanner.Usage(); (got != nil) != tt.complete {
+			t.Fatalf("partial counts %s reported as %+v", tt.usage, got)
+		}
+	}
+}

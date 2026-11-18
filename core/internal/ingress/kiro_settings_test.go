@@ -10,13 +10,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MoeForge/moego/ojson"
 	"github.com/QuantumNous/astrlink/core/contract"
 	"github.com/QuantumNous/astrlink/core/internal/accountauth"
 	"github.com/QuantumNous/astrlink/core/internal/endpoint"
 	"github.com/QuantumNous/astrlink/core/internal/privacy"
 	"github.com/QuantumNous/astrlink/core/internal/providerapi"
 	"github.com/QuantumNous/astrlink/core/internal/relaykitbridge"
-	"github.com/MoeForge/moego/ojson"
 )
 
 func kiroSettingsCandidate(id contract.ServiceID, base string) endpoint.Resolved {
@@ -134,7 +134,7 @@ func TestKiroThinkingRepairRespectsSwitchAndAttemptBudget(t *testing.T) {
 				if opaque {
 					thought = `{"type":"redacted_thinking","data":"foreign-ciphertext"}`
 				}
-				body := `{"model":"claude-sonnet-4-5","thinking":{"type":"enabled","budget_tokens":1024},"max_tokens":2048,"messages":[{"role":"user","content":"hello"},{"role":"assistant","content":[` + thought + `,{"type":"text","text":"keep this answer"}]},{"role":"user","content":"continue"}]}`
+				body := `{"model":"claude-sonnet-4-5","max_tokens":2048,"messages":[{"role":"user","content":"hello"},{"role":"assistant","content":[` + thought + `,{"type":"text","text":"keep this answer"}]},{"role":"user","content":"continue"}]}`
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
 				handler := NewWithDependencies(Dependencies{Resolver: candidateResolver{candidates: []endpoint.Resolved{candidate}}, Authorizer: endpoint.NewServiceAuthorizer(codingPlanCredentials{}, codingPlanCredentials{})})

@@ -62,7 +62,10 @@ func TestKiroSocialAndEnterpriseBrowserAuthorization(t *testing.T) {
 						} else {
 							io.WriteString(w, `{"accessToken":"access-secret","refreshToken":"refresh-secret","expiresIn":3600}`)
 						}
-					case "/ListAvailableProfiles":
+					case "/":
+						if r.Header.Get("X-Amz-Target") != "AmazonCodeWhispererService.ListAvailableProfiles" {
+							t.Error("unexpected management target")
+						}
 						if r.Header.Get("Authorization") != "Bearer access-secret" {
 							t.Error("profile lookup unauthenticated")
 						}
@@ -156,7 +159,7 @@ func TestKiroSocialAndEnterpriseBrowserAuthorization(t *testing.T) {
 				if method == "iam_sso" && tokens.Region != "eu-west-1" {
 					t.Fatal("profile discovery changed OIDC region")
 				}
-				if got := KiroAPIBaseURL(DefaultKiroAPIBaseURL, tokens); got != "https://q.eu-central-1.amazonaws.com" {
+				if got := KiroAPIBaseURL(DefaultKiroAPIBaseURL, tokens); got != "https://runtime.eu-central-1.kiro.dev" {
 					t.Fatalf("data plane=%s", got)
 				}
 				if _, err := manager.CompleteCode(context.Background(), "service_login", session.ID, callback); !errors.Is(err, ErrSessionNotPending) {
@@ -253,7 +256,10 @@ func TestKiroEnterpriseDeviceLoginKeepsAuthenticationRegionAcrossRefresh(t *test
 			} else {
 				io.WriteString(w, `{"accessToken":"access-first","refreshToken":"refresh-first","expiresIn":3600}`)
 			}
-		case "/ListAvailableProfiles":
+		case "/":
+			if r.Header.Get("X-Amz-Target") != "AmazonCodeWhispererService.ListAvailableProfiles" {
+				t.Error("unexpected management target")
+			}
 			io.WriteString(w, `{"profiles":[{"arn":"`+kiroEnterpriseProfile+`"}]}`)
 		default:
 			t.Errorf("unexpected endpoint %s", r.URL.Path)

@@ -29,14 +29,30 @@ func kiroConfigForRegion(config OAuthConfig, region string) (OAuthConfig, error)
 // OIDC and service regions are distinct: only a validated profile ARN selects
 // another data plane. No credential is sent to an arbitrary imported hostname.
 func KiroAPIBaseURL(configured string, tokens AccountTokens) string {
-	if strings.TrimRight(configured, "/") != DefaultKiroAPIBaseURL {
-		return strings.TrimRight(configured, "/")
+	return kiroRegionalURL(configured, "runtime", providerapi.KiroProfileRegion(tokens.ProjectID))
+}
+
+func KiroManagementURL(configured string, tokens AccountTokens) string {
+	return kiroRegionalURL(configured, "management", providerapi.KiroProfileRegion(tokens.ProjectID))
+}
+
+func kiroRegionalURL(configured, plane, region string) string {
+	base := strings.TrimRight(configured, "/")
+	if base != DefaultKiroAPIBaseURL {
+		return base
 	}
-	region := providerapi.KiroProfileRegion(tokens.ProjectID)
-	if region == "" || region == "us-east-1" {
-		return DefaultKiroAPIBaseURL
+	if region == "" {
+		region = "us-east-1"
 	}
-	return "https://q." + region + ".amazonaws.com"
+	return "https://" + plane + "." + region + ".kiro.dev"
+}
+
+// EnsureKiroProfile resolves older grants whose access token response omitted the profile.
+func EnsureKiroProfile(ctx context.Context, config OAuthConfig, tokens *AccountTokens) error {
+	if tokens.ProjectID != "" {
+		return nil
+	}
+	return resolveKiroProfile(ctx, config, tokens)
 }
 
 func resolveKiroProfile(ctx context.Context, config OAuthConfig, tokens *AccountTokens) error {
@@ -49,10 +65,7 @@ func resolveKiroProfile(ctx context.Context, config OAuthConfig, tokens *Account
 			continue
 		}
 		visited[region] = true
-		base := strings.TrimRight(config.APIBaseURL, "/")
-		if base == DefaultKiroAPIBaseURL && region != "us-east-1" {
-			base = "https://q." + region + ".amazonaws.com"
-		}
+		base := kiroRegionalURL(config.APIBaseURL, "management", region)
 		next := ""
 		seen := map[string]bool{}
 		for page := 0; page < 20; page++ {
@@ -61,13 +74,14 @@ func resolveKiroProfile(ctx context.Context, config OAuthConfig, tokens *Account
 				payload["nextToken"] = next
 			}
 			raw, _ := json.Marshal(payload)
-			req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/ListAvailableProfiles", bytes.NewReader(raw))
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/", bytes.NewReader(raw))
 			if err != nil {
 				return err
 			}
 			ApplyKiroAPIHeaders(req.Header, *tokens, config.Identities.KiroIdentityFor(ctx))
 			req.Header.Del(providerapi.KiroProfileHeader)
-			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Content-Type", "application/x-amz-json-1.0")
+			req.Header.Set("X-Amz-Target", "AmazonCodeWhispererService.ListAvailableProfiles")
 			res, err := client.Do(req)
 			if err != nil {
 				if ctx.Err() != nil {

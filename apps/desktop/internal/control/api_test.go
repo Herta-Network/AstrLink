@@ -267,6 +267,10 @@ func (b *bridge) cases() []bridgeCase {
 			return s.ProbeServiceProxy(ctx, raw(`{"service_id":"service_a","proxy":{"mode":"custom","url":"socks5://127.0.0.1:1080"}}`))
 		}, method: post, path: "/control/v1/service-proxy-probes", body: `{"service_id":"service_a","proxy":{"mode":"custom","url":"socks5://127.0.0.1:1080"}}`,
 			timeout: ServiceModelProbeTimeout, limit: normal, reply: `{"ok":true}`},
+		{name: "begin_kiro_authorization", call: func(ctx context.Context) (any, error) {
+			options := raw(`{"method":"social"}`)
+			return s.BeginServiceAuthorization(ctx, "service_a", "browser", &options)
+		}, method: post, path: "/control/v1/services/service_a/authorization", body: `{"flow":"browser","kiro":{"method":"social"}}`, timeout: short, limit: normal, status: http.StatusAccepted, reply: strings.Replace(browserSessionJSON, "openai_codex", "kiro", 1)},
 		{name: "begin_service_authorization", call: func(ctx context.Context) (any, error) {
 			return s.BeginServiceAuthorization(ctx, "service_a", "browser", nil)
 		}, method: post, path: "/control/v1/services/service_a/authorization", body: `{"flow":"browser"}`,

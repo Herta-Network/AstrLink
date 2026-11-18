@@ -11,8 +11,10 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/MoeForge/moego/ojson"
+	"github.com/QuantumNous/astrlink/core/contract"
 )
 
 // Protocol reference: https://github.com/tanu360/kiro-reverse-api/tree/a705464b9132c36f578cea5bf563d42e4d978b1f.
@@ -20,8 +22,9 @@ import (
 // RelayKit. Unlike the reference proxy, it never truncates caller history or
 // rewrites tool schemas to make a request fit.
 const (
-	KiroProfileHeader = "X-AstrLink-Kiro-Profile"
-	kiroMaxBody       = 32 << 20
+	DefaultKiroRuntimeURL = "https://runtime.us-east-1.kiro.dev"
+	KiroProfileHeader     = "X-AstrLink-Kiro-Profile"
+	kiroMaxBody           = 32 << 20
 )
 
 // ApplyKiroHeaders is shared by inference, authorization and catalog/quota
@@ -36,8 +39,15 @@ func ApplyKiroHeaders(header http.Header, token string, identity KiroIdentity) {
 }
 
 type KiroExchange struct {
-	Model     string
-	Streaming bool
+	mu                      sync.Mutex
+	diagnostics             []contract.ConversionDiagnostic
+	observedUsage           *contract.Usage
+	OutputLimitOmitted      bool
+	ToolResultStatusOmitted bool
+	replay                  kiroReplayScope
+	Model                   string
+	Streaming               bool
+	Responses               bool
 }
 
 type kiroImage struct {
@@ -52,41 +62,54 @@ type kiroToolResult struct {
 	Status  string              `json:"status"`
 }
 type kiroTool struct {
-	Specification struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		InputSchema struct {
-			JSON json.RawMessage `json:"json"`
-		} `json:"inputSchema"`
-	} `json:"toolSpecification"`
+	Specification *kiroToolSpecification `json:"toolSpecification,omitempty"`
+	CachePoint    *kiroCachePoint        `json:"cachePoint,omitempty"`
+}
+type kiroToolSpecification struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	InputSchema struct {
+		JSON json.RawMessage `json:"json"`
+	} `json:"inputSchema"`
 }
 type kiroContext struct {
 	Tools   []kiroTool       `json:"tools,omitempty"`
 	Results []kiroToolResult `json:"toolResults,omitempty"`
 }
 type kiroUser struct {
-	Content   string         `json:"content"`
-	Model     string         `json:"modelId"`
-	Origin    string         `json:"origin"`
-	Documents []kiroDocument `json:"documents,omitempty"`
-	Images    []kiroImage    `json:"images,omitempty"`
-	Context   *kiroContext   `json:"userInputMessageContext,omitempty"`
+	CachePoint *kiroCachePoint `json:"cachePoint,omitempty"`
+	Content    string          `json:"content"`
+	Model      string          `json:"modelId"`
+	Origin     string          `json:"origin"`
+	Documents  []kiroDocument  `json:"documents,omitempty"`
+	Images     []kiroImage     `json:"images,omitempty"`
+	Context    *kiroContext    `json:"userInputMessageContext,omitempty"`
 }
 type kiroToolUse struct {
 	ID    string          `json:"toolUseId"`
 	Name  string          `json:"name"`
 	Input json.RawMessage `json:"input"`
 }
+type kiroReasoningText struct {
+	Text      string `json:"text"`
+	Signature string `json:"signature,omitempty"`
+}
+type kiroReasoning struct {
+	Text     *kiroReasoningText `json:"reasoningText,omitempty"`
+	Redacted string             `json:"redactedContent,omitempty"`
+}
 type kiroAssistant struct {
-	Content string        `json:"content"`
-	Tools   []kiroToolUse `json:"toolUses,omitempty"`
+	CachePoint *kiroCachePoint `json:"cachePoint,omitempty"`
+	Reasoning  *kiroReasoning  `json:"reasoningContent,omitempty"`
+	Content    string          `json:"content"`
+	Tools      []kiroToolUse   `json:"toolUses,omitempty"`
 }
 type kiroTurn struct {
 	User      *kiroUser      `json:"userInputMessage,omitempty"`
 	Assistant *kiroAssistant `json:"assistantResponseMessage,omitempty"`
 }
 
-func KiroRequest(req *http.Request, profile, sessionScope string) (*KiroExchange, error) {
+func KiroRequest(req *http.Request, profile, sessionScope string, runtime KiroRuntime) (*KiroExchange, error) {
 	if req.Method != http.MethodPost || !strings.HasSuffix(req.URL.Path, "/messages") || req.Body == nil {
 		return nil, fmt.Errorf("Kiro requires an Anthropic Messages request")
 	}
@@ -102,22 +125,86 @@ func KiroRequest(req *http.Request, profile, sessionScope string) (*KiroExchange
 	if !ojson.ValidBytes(raw) || !root.IsObject() || root.Get("model").String() == "" || !root.Get("messages").IsArray() {
 		return nil, fmt.Errorf("invalid Kiro Messages request")
 	}
+	if len(root.Get("stop_sequences").Array()) > 0 {
+		return nil, fmt.Errorf("Kiro does not support stop_sequences")
+	}
+	fields, err := runtime.modelFields(root)
+	if err != nil {
+		return nil, err
+	}
+	exchange := &KiroExchange{
+		OutputLimitOmitted: root.Get("max_tokens").Exists() && fields["max_tokens"] == nil,
+		replay:             runtime.replay, Model: root.Get("model").String(), Responses: runtime.Responses, Streaming: root.Get("stream").Bool(),
+	}
+	checkpoints := kiroCheckpoints{runtime: runtime, exchange: exchange}
+	conversation, err := kiroInput(root, sessionScope, runtime, &checkpoints)
+	if err != nil {
+		return nil, err
+	}
+	if !runtime.Responses && conversation.missingToolContext() {
+		return nil, fmt.Errorf("Kiro GenerateAssistantResponse requires tools for tool use or result history")
+	}
+	exchange.ToolResultStatusOmitted = runtime.Responses && conversation.hasToolResultError()
+	payload := conversation.payload(profile, runtime, fields)
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	setKiroRequestHeaders(req, profile, runtime.Responses)
+	req.Body = io.NopCloser(bytes.NewReader(body))
+	req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(body)), nil }
+	req.ContentLength = int64(len(body))
+	return exchange, nil
+}
+
+// kiroConversation is the model input shared by both Runtime encoders.
+type kiroConversation struct {
+	model, id, continuation, system string
+	history                         []kiroTurn
+	current                         *kiroUser
+}
+
+func kiroInput(root ojson.Result, sessionScope string, runtime KiroRuntime, checkpoints *kiroCheckpoints) (*kiroConversation, error) {
 	model := root.Get("model").String()
 	turns := []kiroTurn{}
-	for _, message := range root.Get("messages").Array() {
+	messages := root.Get("messages").Array()
+	choice := root.Get("tool_choice")
+	if choice.IsObject() {
+		choice = choice.Get("type")
+	}
+	for i, message := range messages {
 		turn, err := kiroMessage(message, model)
 		if err != nil {
 			return nil, err
 		}
+		if turn.Assistant != nil && turn.Assistant.Reasoning != nil {
+			b := turn.Assistant.Reasoning
+			if (b.Redacted != "" || b.Text != nil && b.Text.Signature != "") && !runtime.replay.check(model, b, false) {
+				return nil, ErrKiroThinkingUnsupported
+			}
+		}
+		// The encoder coalesces consecutive messages with the same role. A
+		// breakpoint inside that merged turn has no corresponding wire position.
+		endsTurn := i+1 == len(messages) || message.Get("role").String() != messages[i+1].Get("role").String()
+		appendsToolDirective := i+1 == len(messages) && (choice.String() == "tool" || choice.String() == "any")
+		checkpoints.message(message.Get("content"), i, turn, endsTurn && !appendsToolDirective)
 		if len(turns) > 0 && turn.User != nil && turns[len(turns)-1].User != nil {
 			previous := turns[len(turns)-1].User
 			previous.Content = kiroJoin(previous.Content, turn.User.Content)
+			previous.CachePoint = turn.User.CachePoint
 			previous.Images = append(previous.Images, turn.User.Images...)
 			previous.Documents = append(previous.Documents, turn.User.Documents...)
 			previous.Context.Results = append(previous.Context.Results, turn.User.Context.Results...)
 		} else if len(turns) > 0 && turn.Assistant != nil && turns[len(turns)-1].Assistant != nil {
 			previous := turns[len(turns)-1].Assistant
+			if previous.Reasoning != nil && turn.Assistant.Reasoning != nil {
+				return nil, ErrKiroThinkingUnsupported
+			}
+			if turn.Assistant.Reasoning != nil {
+				previous.Reasoning = turn.Assistant.Reasoning
+			}
 			previous.Content = kiroJoin(previous.Content, turn.Assistant.Content)
+			previous.CachePoint = turn.Assistant.CachePoint
 			previous.Tools = append(previous.Tools, turn.Assistant.Tools...)
 		} else {
 			turns = append(turns, turn)
@@ -138,63 +225,20 @@ func KiroRequest(req *http.Request, profile, sessionScope string) (*KiroExchange
 	if err != nil {
 		return nil, err
 	}
-	if thinking := root.Get("thinking.type").String(); thinking == "enabled" || thinking == "adaptive" {
-		budget := root.Get("thinking.budget_tokens").Int()
-		if budget <= 0 {
-			budget = 16000
-		}
-		system = kiroJoin(fmt.Sprintf("<thinking_mode>enabled</thinking_mode>\n<max_thinking_length>%d</max_thinking_length>", budget), system)
-	}
-	if system != "" {
+	var systemCheckpoint **kiroCachePoint
+	if system != "" && !runtime.SystemField {
 		history = append([]kiroTurn{
 			{User: &kiroUser{Content: system, Model: model, Origin: "AI_EDITOR"}},
 			{Assistant: &kiroAssistant{Content: "I will follow these instructions."}},
 		}, history...)
+		systemCheckpoint = &history[0].User.CachePoint
 	}
-	choice, selected := root.Get("tool_choice.type").String(), root.Get("tool_choice.name").String()
-	if rawChoice := root.Get("tool_choice"); rawChoice.Type == ojson.String {
-		choice = rawChoice.String()
+	checkpoints.blocks(root.Get("system"), "system", systemCheckpoint)
+	if err := kiroCurrentTools(root, current, checkpoints); err != nil {
+		return nil, err
 	}
-	if choice == "" {
-		choice = "auto"
-	}
-	if choice != "auto" && choice != "none" && choice != "any" && choice != "tool" {
-		return nil, fmt.Errorf("unsupported Kiro tool_choice")
-	}
-	if choice == "any" && len(root.Get("tools").Array()) == 0 {
-		return nil, fmt.Errorf("tool_choice any requires tools")
-	}
-	if choice == "tool" && selected == "" {
-		return nil, fmt.Errorf("tool_choice tool requires a name")
-	}
-	for _, tool := range root.Get("tools").Array() {
-		if choice == "none" {
-			break
-		}
-		name, schema := tool.Get("name").String(), tool.Get("input_schema")
-		if choice == "tool" && name != selected {
-			continue
-		}
-		if name == "" || !schema.IsObject() || (tool.Get("type").String() != "" && tool.Get("type").String() != "custom") {
-			return nil, fmt.Errorf("Kiro requires named custom tools with object input schemas")
-		}
-		var converted kiroTool
-		converted.Specification.Name = name
-		converted.Specification.Description = tool.Get("description").String()
-		converted.Specification.InputSchema.JSON = json.RawMessage(schema.Raw)
-		current.Context.Tools = append(current.Context.Tools, converted)
-	}
-	if choice == "tool" && len(current.Context.Tools) == 0 {
-		return nil, fmt.Errorf("tool_choice names an undeclared tool")
-	}
-	if choice == "any" {
-		current.Content = kiroJoin(current.Content, "The client requires a tool call on this turn. Call at least one available tool.")
-	}
-	if choice == "tool" {
-		current.Content = kiroJoin(current.Content, fmt.Sprintf("The client requires the tool %q on this turn. Call that tool.", selected))
-	}
-	if current.Content == "" {
-		current.Content = "Continue using the supplied conversation and tool results."
+	if err := checkpoints.finish(root, current); err != nil {
+		return nil, err
 	}
 	// A caller-provided UUID is reusable without isolation; otherwise the
 	// mapping includes its identity and the stable per-account scope.
@@ -220,55 +264,144 @@ func KiroRequest(req *http.Request, profile, sessionScope string) (*KiroExchange
 			uniqueKiroDocumentNames(turn.User.Documents)
 		}
 	}
-	payload := map[string]any{
-		"conversationState": map[string]any{
-			"chatTriggerType": "MANUAL", "agentTaskType": "vibe", "agentContinuationId": randomUUID(),
-			"conversationId": conversationID, "currentMessage": kiroTurn{User: current}, "history": history,
-		},
+	return &kiroConversation{model: model, id: conversationID, continuation: randomUUID(), system: system, history: history, current: current}, nil
+}
+
+func kiroCurrentTools(root ojson.Result, current *kiroUser, checkpoints *kiroCheckpoints) error {
+	choice, selected := root.Get("tool_choice.type").String(), root.Get("tool_choice.name").String()
+	if rawChoice := root.Get("tool_choice"); rawChoice.Type == ojson.String {
+		choice = rawChoice.String()
 	}
+	if choice == "" {
+		choice = "auto"
+	}
+	if choice != "auto" && choice != "none" && choice != "any" && choice != "tool" {
+		return fmt.Errorf("unsupported Kiro tool_choice")
+	}
+	if choice != "none" && root.Get("tool_choice.disable_parallel_tool_use").Bool() {
+		return fmt.Errorf("Kiro cannot enforce disable_parallel_tool_use")
+	}
+	if choice == "any" && len(root.Get("tools").Array()) == 0 {
+		return fmt.Errorf("tool_choice any requires tools")
+	}
+	if choice == "tool" && selected == "" {
+		return fmt.Errorf("tool_choice tool requires a name")
+	}
+	for i, tool := range root.Get("tools").Array() {
+		name, schema := tool.Get("name").String(), tool.Get("input_schema")
+		if choice == "none" || choice == "tool" && name != selected {
+			checkpoints.tool(tool.Get("cache_control"), i, nil)
+			continue
+		}
+		if name == "" || !schema.IsObject() || (tool.Get("type").String() != "" && tool.Get("type").String() != "custom") {
+			return fmt.Errorf("Kiro requires named custom tools with object input schemas")
+		}
+		if tool.Get("strict").Bool() || tool.Get("defer_loading").Bool() {
+			return fmt.Errorf("Kiro cannot enforce strict or deferred tool declarations")
+		}
+		converted := kiroTool{Specification: &kiroToolSpecification{}}
+		converted.Specification.Name = name
+		converted.Specification.Description = tool.Get("description").String()
+		converted.Specification.InputSchema.JSON = json.RawMessage(schema.Raw)
+		current.Context.Tools = append(current.Context.Tools, converted)
+		checkpoints.tool(tool.Get("cache_control"), i, &current.Context.Tools)
+	}
+	if choice == "tool" && len(current.Context.Tools) == 0 {
+		return fmt.Errorf("tool_choice names an undeclared tool")
+	}
+	if choice == "any" {
+		current.Content = kiroJoin(current.Content, "The client requires a tool call on this turn. Call at least one available tool.")
+	}
+	if choice == "tool" {
+		current.Content = kiroJoin(current.Content, fmt.Sprintf("The client requires the tool %q on this turn. Call that tool.", selected))
+	}
+	if current.Content == "" && (current.Context == nil || len(current.Context.Results) == 0) {
+		current.Content = "Continue using the supplied conversation and tool results."
+	}
+	return nil
+}
+
+func (c *kiroConversation) payload(profile string, runtime KiroRuntime, fields map[string]any) map[string]any {
+	var payload map[string]any
+	if runtime.Responses {
+		payload = c.responsesPayload(profile, fields)
+		if runtime.SystemField && c.system != "" {
+			payload["instructions"] = c.system
+		}
+		return payload
+	}
+	payload = map[string]any{"agentMode": "vibe", "conversationState": map[string]any{
+		"chatTriggerType": "MANUAL", "agentTaskType": "vibe", "agentContinuationId": c.continuation,
+		"conversationId": c.id, "currentMessage": kiroTurn{User: c.current}, "history": c.history,
+	}}
 	if profile != "" {
 		payload["profileArn"] = profile
 	}
-	inference := map[string]any{}
-	for from, to := range map[string]string{"max_tokens": "maxTokens", "temperature": "temperature", "top_p": "topP"} {
-		if value := root.Get(from); value.Exists() {
-			inference[to] = json.RawMessage(value.Raw)
-		}
+	if runtime.SystemField && c.system != "" {
+		payload["systemPrompt"] = c.system
 	}
-	if len(inference) > 0 {
-		payload["inferenceConfig"] = inference
+	if len(fields) > 0 {
+		payload["additionalModelRequestFields"] = fields
 	}
-	if root.Get("stop_sequences").Exists() && len(root.Get("stop_sequences").Array()) > 0 {
-		return nil, fmt.Errorf("Kiro does not support stop_sequences")
-	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return nil, err
-	}
+	return payload
+}
+
+func setKiroRequestHeaders(req *http.Request, profile string, responses bool) {
 	identity, recognized := RecognizeKiroIdentity(req.Header)
 	header := make(http.Header)
 	if !recognized || !strings.Contains(identity.UserAgent, "api/codewhispererstreaming#") {
 		identity = KiroIdentityAt(identity.Version, true)
 	}
 	ApplyKiroHeaders(header, strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer "), identity)
-	header.Set("Content-Type", "application/json")
-	header.Set("Accept", "application/vnd.amazon.eventstream")
-	header.Set("X-Amz-Target", "AmazonCodeWhispererStreamingService.GenerateAssistantResponse")
-	header.Set("X-Amzn-Kiro-Agent-Mode", "vibe")
-	header.Set("Amz-Sdk-Invocation-Id", randomUUID())
-	header.Set("Amz-Sdk-Request", "attempt=1; max=1")
-	req.Header = header
-	if req.URL.Hostname() == "codewhisperer.us-east-1.amazonaws.com" {
-		if region := KiroProfileRegion(profile); region != "" && region != "us-east-1" {
-			req.URL.Host = "q." + region + ".amazonaws.com"
+	// This transport makes one attempt. Provider failover happens outside it.
+	header.Set("X-Amzn-Kiro-Attempt", "1;max=1")
+	if req.URL.Scheme+"://"+req.URL.Host == DefaultKiroRuntimeURL {
+		if region := KiroProfileRegion(profile); region != "" {
+			req.URL.Host = "runtime." + region + ".kiro.dev"
 			req.Host = ""
 		}
 	}
-	req.URL.Path, req.URL.RawPath, req.URL.RawQuery = "/generateAssistantResponse", "", ""
-	req.Body = io.NopCloser(bytes.NewReader(body))
-	req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(body)), nil }
-	req.ContentLength = int64(len(body))
-	return &KiroExchange{Model: model, Streaming: root.Get("stream").Bool()}, nil
+	req.URL.Path, req.URL.RawPath, req.URL.RawQuery = "/", "", ""
+	req.URL.ForceQuery = false
+	if responses {
+		req.URL.Path = "/v1/responses"
+		// The raw Responses sender uses HTTP, not Smithy's SDK headers.
+		header.Del("X-Amz-User-Agent")
+		header.Set("Content-Type", "application/json")
+		header.Set("Accept", "text/event-stream")
+		header.Set("X-Amzn-Kiro-Origin", "AI_EDITOR")
+		if profile != "" {
+			header.Set("X-Amzn-Kiro-Profile", profile)
+		}
+	} else {
+		header.Set("X-Amzn-Kiro-Agent-Mode", "vibe")
+		header.Set("Amz-Sdk-Invocation-Id", randomUUID())
+		header.Set("Amz-Sdk-Request", "attempt=1; max=1")
+		header.Set("Content-Type", "application/x-amz-json-1.0")
+		header.Set("Accept", "application/vnd.amazon.eventstream")
+		header.Set("X-Amz-Target", "AmazonCodeWhispererStreamingService.GenerateAssistantResponse")
+	}
+	req.Header = header
+}
+
+func (c *kiroConversation) missingToolContext() bool {
+	if c.current.Context != nil {
+		for _, tool := range c.current.Context.Tools {
+			if tool.Specification != nil {
+				return false
+			}
+		}
+		if len(c.current.Context.Results) > 0 {
+			return true
+		}
+	}
+	for _, turn := range c.history {
+		if turn.Assistant != nil && len(turn.Assistant.Tools) > 0 ||
+			turn.User != nil && turn.User.Context != nil && len(turn.User.Context.Results) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func kiroJoin(a, b string) string {
@@ -316,16 +449,19 @@ func kiroMessage(message ojson.Result, model string) (kiroTurn, error) {
 			switch block.Get("type").String() {
 			case "text":
 				text = kiroJoin(text, block.Get("text").String())
-			case "redacted_thinking":
-				return kiroTurn{}, ErrKiroThinkingUnsupported
-			case "thinking":
-				if block.Get("signature").String() != "" {
+			case "redacted_thinking", "thinking":
+				if role != "assistant" || assistant.Reasoning != nil {
 					return kiroTurn{}, ErrKiroThinkingUnsupported
 				}
-				if role != "assistant" {
-					return kiroTurn{}, fmt.Errorf("thinking must belong to an assistant")
+				if block.Get("type").String() == "redacted_thinking" {
+					data := block.Get("data").String()
+					if _, err := base64.StdEncoding.DecodeString(data); data == "" || err != nil {
+						return kiroTurn{}, ErrKiroThinkingUnsupported
+					}
+					assistant.Reasoning = &kiroReasoning{Redacted: data}
+				} else {
+					assistant.Reasoning = &kiroReasoning{Text: &kiroReasoningText{Text: block.Get("thinking").String(), Signature: block.Get("signature").String()}}
 				}
-				text = kiroJoin(text, "<thinking>"+block.Get("thinking").String()+"</thinking>")
 			case "document", "file", "input_file":
 				if role != "user" {
 					return kiroTurn{}, fmt.Errorf("Kiro documents must belong to a user message")
@@ -359,7 +495,7 @@ func kiroMessage(message ojson.Result, model string) (kiroTurn, error) {
 				if role != "user" || block.Get("tool_use_id").String() == "" {
 					return kiroTurn{}, fmt.Errorf("invalid Kiro tool result")
 				}
-				resultText, err := kiroToolResultContent(block.Get("content"), user)
+				resultContent, err := kiroToolResultContent(block.Get("content"), user)
 				if err != nil {
 					return kiroTurn{}, err
 				}
@@ -367,7 +503,7 @@ func kiroMessage(message ojson.Result, model string) (kiroTurn, error) {
 				if block.Get("is_error").Bool() {
 					status = "error"
 				}
-				user.Context.Results = append(user.Context.Results, kiroToolResult{ID: block.Get("tool_use_id").String(), Content: []map[string]string{{"text": resultText}}, Status: status})
+				user.Context.Results = append(user.Context.Results, kiroToolResult{ID: block.Get("tool_use_id").String(), Content: resultContent, Status: status})
 			default:
 				return kiroTurn{}, fmt.Errorf("unsupported Kiro content block type %q", block.Get("type").String())
 			}

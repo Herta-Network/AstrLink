@@ -9,12 +9,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/MoeForge/moego/ojson"
 	"github.com/QuantumNous/astrlink/core/contract"
 	"github.com/QuantumNous/astrlink/core/internal/endpoint"
 	"github.com/QuantumNous/astrlink/core/internal/privacy"
 	"github.com/QuantumNous/astrlink/core/internal/providerapi"
 	"github.com/QuantumNous/astrlink/core/internal/relaykitbridge"
-	"github.com/MoeForge/moego/ojson"
 )
 
 func TestKiroDocumentsAndForcedToolsAcrossProtocols(t *testing.T) {
@@ -118,7 +118,7 @@ func TestKiroRequiredToolChoiceThroughOpenAIConversion(t *testing.T) {
 			t.Fatal(err)
 		}
 		req := httptest.NewRequest("POST", "https://example.test/v1/messages", strings.NewReader(string(converted.Body)))
-		if _, err := providerapi.KiroRequest(req, "", ""); err != nil {
+		if _, err := providerapi.KiroRequest(req, "", "", providerapi.KiroRuntime{}); err != nil {
 			t.Fatal(err)
 		}
 		out, _ := io.ReadAll(req.Body)
@@ -130,7 +130,7 @@ func TestKiroRequiredToolChoiceThroughOpenAIConversion(t *testing.T) {
 
 func TestKiroResponsesToolOutputDocumentPreservesCallAssociation(t *testing.T) {
 	data := base64.StdEncoding.EncodeToString([]byte("spreadsheet bytes"))
-	body := `{"model":"m","input":[{"role":"user","content":"read"},{"type":"function_call","call_id":"call_one","name":"read","arguments":"{}"},{"type":"function_call_output","call_id":"call_one","output":[{"type":"input_text","text":"tool result"},{"type":"input_file","filename":"report.xlsx","file_data":"data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,` + data + `"}]}]}`
+	body := `{"model":"m","tools":[{"type":"function","name":"read","parameters":{"type":"object"}}],"input":[{"role":"user","content":"read"},{"type":"function_call","call_id":"call_one","name":"read","arguments":"{}"},{"type":"function_call_output","call_id":"call_one","output":[{"type":"input_text","text":"tool result"},{"type":"input_file","filename":"report.xlsx","file_data":"data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,` + data + `"}]}]}`
 	prepared, documents, err := providerapi.PrepareKiroDocuments(contract.ProtocolOpenAIResponses, []byte(body))
 	if err != nil {
 		t.Fatal(err)
@@ -144,7 +144,7 @@ func TestKiroResponsesToolOutputDocumentPreservesCallAssociation(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := httptest.NewRequest("POST", "https://example.test/v1/messages", strings.NewReader(string(restored)))
-	if _, err := providerapi.KiroRequest(req, "", ""); err != nil {
+	if _, err := providerapi.KiroRequest(req, "", "", providerapi.KiroRuntime{}); err != nil {
 		t.Fatal(err)
 	}
 	out, _ := io.ReadAll(req.Body)
@@ -156,7 +156,7 @@ func TestKiroResponsesToolOutputDocumentPreservesCallAssociation(t *testing.T) {
 
 func TestKiroChatToolOutputDocumentPreservesCallAssociation(t *testing.T) {
 	data := base64.StdEncoding.EncodeToString([]byte("document bytes"))
-	body := `{"model":"m","messages":[{"role":"user","content":"read"},{"role":"assistant","tool_calls":[{"id":"call_one","type":"function","function":{"name":"read","arguments":"{}"}}]},{"role":"tool","tool_call_id":"call_one","content":[{"type":"text","text":"tool result"},{"type":"file","file":{"filename":"report.docx","file_data":"data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,` + data + `"}}]}]}`
+	body := `{"model":"m","tools":[{"type":"function","function":{"name":"read","parameters":{"type":"object"}}}],"messages":[{"role":"user","content":"read"},{"role":"assistant","tool_calls":[{"id":"call_one","type":"function","function":{"name":"read","arguments":"{}"}}]},{"role":"tool","tool_call_id":"call_one","content":[{"type":"text","text":"tool result"},{"type":"file","file":{"filename":"report.docx","file_data":"data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,` + data + `"}}]}]}`
 	prepared, documents, err := providerapi.PrepareKiroDocuments(contract.ProtocolOpenAIChat, []byte(body))
 	if err != nil {
 		t.Fatal(err)
@@ -170,7 +170,7 @@ func TestKiroChatToolOutputDocumentPreservesCallAssociation(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := httptest.NewRequest("POST", "https://example.test/v1/messages", strings.NewReader(string(restored)))
-	if _, err := providerapi.KiroRequest(req, "", ""); err != nil {
+	if _, err := providerapi.KiroRequest(req, "", "", providerapi.KiroRuntime{}); err != nil {
 		t.Fatal(err)
 	}
 	out, _ := io.ReadAll(req.Body)

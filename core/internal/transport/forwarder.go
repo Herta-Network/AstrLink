@@ -4,6 +4,7 @@
 package transport
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -21,10 +22,24 @@ import (
 const copyBufferSize = 32 * 1024
 const localPolicyWarningHeader = "X-AstrLink-Policy-Warning"
 
+// KiroRuntimeResolver selects the encoding for the credential already bound to this attempt.
+type KiroRuntimeResolver func(context.Context, http.Header, string, bool) (providerapi.KiroRuntime, error)
+
+// KiroAttempt belongs to a single selected candidate. Preparation fills the
+// exchange before ObserveOutbound records the resulting wire request.
+type KiroAttempt struct {
+	Resolve   KiroRuntimeResolver
+	Model     string
+	Auxiliary bool
+	Caller    contract.AccessTokenID
+	Exchange  *providerapi.KiroExchange
+}
+
 // Target contains the already-resolved upstream URL and safe request headers.
 // RequestHeaders may include authentication material prepared by a higher
 // layer. Forwarder does not log or otherwise retain those values.
 type Target struct {
+	Kiro             *KiroAttempt
 	Service          contract.Service
 	ProxyCredentials secretstore.SecretStore
 	// HandleResponse owns the body when set, and decides before any client bytes.
@@ -98,6 +113,7 @@ func (err *ResponseError) Unwrap() error {
 
 // Forwarder performs one protocol-preserving upstream round trip.
 type Forwarder struct {
+	kiroReplay     providerapi.KiroReplay
 	roundTripper   http.RoundTripper
 	proxyTransport http.RoundTripper
 }
@@ -153,10 +169,27 @@ func (forwarder *Forwarder) RoundTrip(request *http.Request, target Target) (*ht
 	}
 	var kiroExchange *providerapi.KiroExchange
 	if target.Service.Kind == contract.ServiceKindKiroSubscription {
-		kiroExchange, err = providerapi.KiroRequest(outbound, target.RequestHeaders.Get(providerapi.KiroProfileHeader), target.RequestHeaders.Get(providerapi.KiroSessionHeader))
+		var runtime providerapi.KiroRuntime
+		attempt := target.Kiro
+		if attempt == nil {
+			attempt = &KiroAttempt{}
+		}
+		if attempt.Resolve != nil {
+			runtime, err = attempt.Resolve(ctx, target.RequestHeaders, attempt.Model, attempt.Auxiliary)
+			if err != nil {
+				return nil, &UpstreamError{err: err}
+			}
+		}
+		profile := target.RequestHeaders.Get(providerapi.KiroProfileHeader)
+		if runtime.Profile != "" {
+			profile = runtime.Profile
+		}
+		runtime.BindReplay(&forwarder.kiroReplay, string(target.Service.ID), profile, target.RequestHeaders.Get("Authorization"), string(attempt.Caller))
+		kiroExchange, err = providerapi.KiroRequest(outbound, profile, target.RequestHeaders.Get(providerapi.KiroSessionHeader), runtime)
 		if err != nil {
 			return nil, &TargetError{err: err}
 		}
+		attempt.Exchange = kiroExchange
 	}
 	antigravityMode := ""
 	if target.Service.Kind == contract.ServiceKindAntigravitySubscription {

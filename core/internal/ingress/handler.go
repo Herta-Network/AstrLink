@@ -71,6 +71,7 @@ func (function AccessTokenAuthenticatorFunc) AuthenticateAccessToken(ctx context
 }
 
 type Dependencies struct {
+	ResolveKiro              transport.KiroRuntimeResolver
 	ProxyCredentials         secretstore.SecretStore
 	Resolver                 endpoint.Resolver
 	Authorizer               endpoint.Authorizer
@@ -133,6 +134,7 @@ func (function PolicyWarningReporterFunc) ReportPolicyWarning(warning privacy.Wa
 }
 
 type Handler struct {
+	resolveKiro              transport.KiroRuntimeResolver
 	builtinStates            builtintools.Store
 	searchRefs               searchRefStore
 	codexTurns               codexTurnStore
@@ -309,6 +311,7 @@ func NewWithDependencies(dependencies Dependencies) *Handler {
 	}
 	return &Handler{
 		claudeOfficial: dependencies.ClaudeOfficial, claudeOfficialForwarder: claudeOfficialForwarder,
+		resolveKiro:      dependencies.ResolveKiro,
 		proxyCredentials: dependencies.ProxyCredentials,
 		resolver:         dependencies.Resolver, authorizer: dependencies.Authorizer, forwarder: dependencies.Forwarder,
 		accessTokenAuthenticator: dependencies.AccessTokenAuthenticator, privacyFilter: dependencies.PrivacyFilter,

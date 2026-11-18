@@ -8,7 +8,10 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/MoeForge/moego/ojson"
 	"github.com/QuantumNous/astrlink/core/contract"
+	"github.com/QuantumNous/astrlink/core/internal/jsonedit"
+	"github.com/QuantumNous/astrlink/core/internal/providerapi"
 	"github.com/QuantumNous/astrlink/core/internal/relaykitbridge"
 )
 
@@ -16,6 +19,7 @@ import (
 // It intentionally treats a non-2xx upstream response as protocol-native
 // passthrough so existing endpoint health and retry behavior is retained.
 type relayKitResponseWriter struct {
+	kiroExchange *providerapi.KiroExchange
 	http.ResponseWriter
 	engine                     relaykitbridge.ConversionEngine
 	plan                       contract.ExecutionPlan
@@ -114,6 +118,12 @@ func (writer *relayKitResponseWriter) Finish() error {
 		})
 		if err != nil {
 			return err
+		}
+		if writer.kiroExchange != nil {
+			output.Body, err = writer.kiroClientUsage(output.Body, "")
+			if err != nil {
+				return err
+			}
 		}
 		writer.diagnostics = output.Diagnostics
 		writer.Header().Set("Content-Type", output.ContentType)
@@ -240,6 +250,13 @@ func parseSSEFrame(frame []byte) (string, []byte) {
 
 func (writer *relayKitResponseWriter) writeEvents(events []relaykitbridge.ResponseEvent) error {
 	for _, event := range events {
+		if writer.kiroExchange != nil && event.Type != "done" {
+			data, err := writer.kiroClientUsage(event.Data, event.Type)
+			if err != nil {
+				return err
+			}
+			event.Data = data
+		}
 		wire := formatRelayKitEvent(writer.plan.InputProtocol, event)
 		if wire == nil {
 			continue
@@ -258,6 +275,61 @@ func (writer *relayKitResponseWriter) writeEvents(events []relaykitbridge.Respon
 	return nil
 }
 
+// RelayKit can serialize zero-filled OpenAI usage even when a provider sends
+// credits alone. Use the original Kiro attempt's counters and their presence.
+// Streaming Chat only gets a usage object when the converter emits its usage
+// chunk. This edits one event at a time and preserves its frame and order.
+func (writer *relayKitResponseWriter) kiroClientUsage(body []byte, event string) ([]byte, error) {
+	path, input, output := "usage", "prompt_tokens", "completion_tokens"
+	nullable := writer.streaming
+	switch writer.plan.InputProtocol {
+	case contract.ProtocolOpenAIChat:
+	case contract.ProtocolOpenAIResponses:
+		input, output = "input_tokens", "output_tokens"
+		nullable = true
+		if writer.streaming {
+			switch event {
+			case "response.created", "response.in_progress":
+				if ojson.GetBytes(body, "response.usage").IsObject() {
+					return jsonedit.Set(body, "response.usage", nil)
+				}
+				return body, nil
+			case "response.completed", "response.failed", "response.incomplete":
+				path = "response.usage"
+			default:
+				return body, nil
+			}
+		}
+	default:
+		return body, nil
+	}
+	present := ojson.GetBytes(body, path)
+	if writer.streaming && writer.plan.InputProtocol == contract.ProtocolOpenAIChat && !present.IsObject() {
+		return body, nil
+	}
+	usage := writer.kiroExchange.ObservedUsage()
+	if usage == nil {
+		if !present.Exists() || present.Type == ojson.Null {
+			return body, nil
+		}
+		if nullable {
+			return jsonedit.Set(body, path, nil)
+		}
+		return jsonedit.Delete(body, path)
+	}
+	value := map[string]any{input: usage.InputTokens, output: usage.OutputTokens, "total_tokens": usage.TotalTokens}
+	details := map[string]int{}
+	if usage.CacheReadTokens != nil {
+		details["cached_tokens"] = *usage.CacheReadTokens
+	}
+	if usage.CacheWriteTokens != nil {
+		details["cache_write_tokens"] = *usage.CacheWriteTokens
+	}
+	if len(details) > 0 {
+		value[input+"_details"] = details
+	}
+	return jsonedit.Set(body, path, value)
+}
 func formatRelayKitEvent(protocol contract.ProtocolID, event relaykitbridge.ResponseEvent) []byte {
 	if event.Type == "done" {
 		return []byte("data: [DONE]\n\n")

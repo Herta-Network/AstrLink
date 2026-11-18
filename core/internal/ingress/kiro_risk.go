@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/QuantumNous/astrlink/core/contract"
 	"github.com/MoeForge/moego/ojson"
+	"github.com/QuantumNous/astrlink/core/contract"
 )
 
 // Kiro distinguishes exhausted monthly credits from transient capacity and

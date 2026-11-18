@@ -40,7 +40,7 @@ func TestKiroRequestPreservesConversationToolsAndIdentity(t *testing.T) {
 	req.Header.Set("X-AstrLink-Injected", "drop")
 	req.Header.Set("User-Agent", "AstrLink")
 	req.Header.Set("Originator", "AstrLink")
-	exchange, err := KiroRequest(req, "arn:test-profile", "")
+	exchange, err := KiroRequest(req, "arn:test-profile", "", KiroRuntime{ModelSchema: json.RawMessage(`{"properties":{"temperature":{"type":"number"}}}`)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestKiroRequestPreservesConversationToolsAndIdentity(t *testing.T) {
 	}
 	raw, _ := io.ReadAll(req.Body)
 	root := ojson.ParseBytes(raw)
-	if req.URL.Path != "/generateAssistantResponse" || req.URL.RawQuery != "" {
+	if req.URL.Path != "/" || req.URL.RawQuery != "" {
 		t.Fatalf("url=%s", req.URL)
 	}
 	for name, values := range req.Header {
@@ -73,7 +73,7 @@ func TestKiroRequestPreservesConversationToolsAndIdentity(t *testing.T) {
 	if current.Get("userInputMessageContext.tools.0.toolSpecification.inputSchema.json.additionalProperties").Bool() {
 		t.Fatal("schema changed")
 	}
-	if root.Get("inferenceConfig.temperature").Raw != "0" {
+	if root.Get("additionalModelRequestFields.temperature").Raw != "0" {
 		t.Fatal("zero temperature omitted")
 	}
 	if root.Get("profileArn").String() != "arn:test-profile" {
@@ -88,7 +88,7 @@ func TestKiroRequestRejectsUnsupportedContentInsteadOfDroppingIt(t *testing.T) {
 		`{"model":"m","messages":[{"role":"user","content":"hello"},{"role":"assistant","content":"prefill"}]}`,
 	} {
 		req := httptest.NewRequest("POST", "https://example.test/v1/messages", strings.NewReader(body))
-		if _, err := KiroRequest(req, "", ""); err == nil {
+		if _, err := KiroRequest(req, "", "", KiroRuntime{}); err == nil {
 			t.Fatalf("accepted lossy conversion: %s", body)
 		}
 	}
@@ -162,7 +162,7 @@ func TestKiroResponseRejectsCorruptionTruncationAndExceptions(t *testing.T) {
 func TestKiroToolSchemaRetainsLargeNumbers(t *testing.T) {
 	body := `{"model":"m","messages":[{"role":"user","content":"hello"}],"tools":[{"name":"call","input_schema":{"type":"object","properties":{"n":{"const":9007199254740993}}}}]}`
 	req := httptest.NewRequest("POST", "https://example.test/v1/messages", strings.NewReader(body))
-	if _, err := KiroRequest(req, "", ""); err != nil {
+	if _, err := KiroRequest(req, "", "", KiroRuntime{}); err != nil {
 		t.Fatal(err)
 	}
 	raw, _ := io.ReadAll(req.Body)

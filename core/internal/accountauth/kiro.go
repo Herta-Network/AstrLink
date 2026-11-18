@@ -21,7 +21,7 @@ import (
 // auth/oidc.go. Client secrets are issued at login, never bundled in the app.
 const (
 	DefaultKiroIssuer     = "https://oidc.us-east-1.amazonaws.com"
-	DefaultKiroAPIBaseURL = "https://codewhisperer.us-east-1.amazonaws.com"
+	DefaultKiroAPIBaseURL = providerapi.DefaultKiroRuntimeURL
 	kiroStartURL          = "https://view.awsapps.com/start"
 )
 
