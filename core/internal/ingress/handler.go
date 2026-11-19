@@ -31,6 +31,7 @@ import (
 	"github.com/QuantumNous/astrlink/core/internal/imagecompress"
 	"github.com/QuantumNous/astrlink/core/internal/planner"
 	"github.com/QuantumNous/astrlink/core/internal/privacy"
+	"github.com/QuantumNous/astrlink/core/internal/providerapi"
 	"github.com/QuantumNous/astrlink/core/internal/relaykitbridge"
 	"github.com/QuantumNous/astrlink/core/internal/secretstore"
 	"github.com/QuantumNous/astrlink/core/internal/transport"
@@ -71,6 +72,7 @@ func (function AccessTokenAuthenticatorFunc) AuthenticateAccessToken(ctx context
 }
 
 type Dependencies struct {
+	ResolveKiro              transport.KiroRuntimeResolver
 	ProxyCredentials         secretstore.SecretStore
 	Resolver                 endpoint.Resolver
 	Authorizer               endpoint.Authorizer
@@ -133,6 +135,7 @@ func (function PolicyWarningReporterFunc) ReportPolicyWarning(warning privacy.Wa
 }
 
 type Handler struct {
+	resolveKiro              transport.KiroRuntimeResolver
 	builtinStates            builtintools.Store
 	searchRefs               searchRefStore
 	codexTurns               codexTurnStore
@@ -309,6 +312,7 @@ func NewWithDependencies(dependencies Dependencies) *Handler {
 	}
 	return &Handler{
 		claudeOfficial: dependencies.ClaudeOfficial, claudeOfficialForwarder: claudeOfficialForwarder,
+		resolveKiro:      dependencies.ResolveKiro,
 		proxyCredentials: dependencies.ProxyCredentials,
 		resolver:         dependencies.Resolver, authorizer: dependencies.Authorizer, forwarder: dependencies.Forwarder,
 		accessTokenAuthenticator: dependencies.AccessTokenAuthenticator, privacyFilter: dependencies.PrivacyFilter,
@@ -532,6 +536,11 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	}
 	candidates, err = handler.bindResponseAffinity(request.Context(), classified, candidates)
 	if err != nil {
+		var parameter *providerapi.KiroParameterError
+		if errors.As(err, &parameter) {
+			handler.writeExecutionFailure(outWriter, request, classified, executionFailure{kind: executionFailureKiroParameter, parameter: parameter})
+			return
+		}
 		writeInferenceError(outWriter, http.StatusConflict, "response_affinity_unavailable", err.Error(), false, nil)
 		session.noteFailed(errorSummaryFromInference("response_affinity_unavailable", err.Error(), false))
 		return
@@ -1366,6 +1375,7 @@ type inferenceError struct {
 }
 
 type errorDetail struct {
+	Field             string   `json:"field,omitempty"`
 	Protocol          string   `json:"protocol,omitempty"`
 	ServiceID         string   `json:"service_id,omitempty"`
 	Reason            string   `json:"reason,omitempty"`

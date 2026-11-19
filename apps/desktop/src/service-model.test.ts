@@ -29,6 +29,28 @@ import {
 const createdAt = "2026-07-28T12:00:00Z";
 
 describe("service model", () => {
+  it("reads Kiro adapter entries", () => {
+    const source = {
+      id: "service_kiro",
+      name: "Kiro",
+      kind: "kiro_subscription",
+      enabled: true,
+      models: [],
+      capabilities: [
+        { protocol: "anthropic.messages", mode: "adapter", streaming: true },
+        { protocol: "openai.models", mode: "adapter", streaming: false },
+      ],
+      subscription: { provider: "kiro", status: "disconnected" },
+      created_at: createdAt,
+      updated_at: createdAt,
+    };
+    const parsed = parseService(source);
+    expect(parsed.capabilities.map((capability) => capability.mode)).toEqual([
+      "adapter",
+      "adapter",
+    ]);
+  });
+
   it("reads saved Vertex providers with an implicit project or Express key", () => {
     for (const scheme of [
       "google_service_account",
@@ -452,6 +474,16 @@ describe("service model", () => {
     expect(
       withClaudeCodeRedirects("openai", [], [], ["claude-fable-6.0"]),
     ).toEqual([]);
+  });
+
+  it("shows the three built-in Claude 5.5 aliases for Kiro", () => {
+    expect(serviceBuiltinRedirects("kiro_subscription")).toEqual(
+      ["opus", "sonnet", "haiku"].map((family) => ({
+        from: `claude-${family}-5-5`,
+        defaultTo: `claude-${family}-5.5`,
+        defaultEnabled: true,
+      })),
+    );
   });
 
   it("accepts sealed account credentials and still reads keystore ones", () => {

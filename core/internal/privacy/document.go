@@ -180,6 +180,9 @@ func isNonTextMediaChild(
 		if childIsMap {
 			sourceType, _ := childMap["type"].(string)
 			sourceType = strings.ToLower(strings.ReplaceAll(sourceType, "_", ""))
+			if typeName == "document" && sourceType == "text" {
+				return false
+			}
 			if sourceType == "base64" || sourceType == "url" {
 				return true
 			}

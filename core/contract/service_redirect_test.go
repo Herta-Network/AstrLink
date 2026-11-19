@@ -108,6 +108,29 @@ func TestCopilotBuiltinRedirectsYieldToStoredRules(t *testing.T) {
 		t.Fatalf("built-in rules are invalid: %v", err)
 	}
 	if contract.ServiceKindClaudeSubscription.BuiltinModelRedirects() != nil {
-		t.Fatal("only Copilot has built-in rules")
+		t.Fatal("Claude subscription unexpectedly has built-in rules")
+	}
+}
+
+func TestKiroBuiltinClaude55Redirects(t *testing.T) {
+	t.Parallel()
+	service := contract.Service{Kind: contract.ServiceKindKiroSubscription, Models: []string{"claude-opus-5.5", "claude-sonnet-5.5", "claude-haiku-5.5", "claude-opus-5"}}
+	if rules := service.Kind.BuiltinModelRedirects(); len(rules) != 3 || contract.ValidateModelRedirects(rules) != nil {
+		t.Fatalf("unexpected default rules: %+v", rules)
+	}
+	for _, family := range []string{"opus", "sonnet", "haiku"} {
+		native := "claude-" + family + "-5.5"
+		for _, name := range []string{"claude-" + family + "-5-5", native} {
+			if got, ok := service.UpstreamModelFor(name); !ok || got != native {
+				t.Errorf("%s resolved to %q, %t", name, got, ok)
+			}
+		}
+	}
+	service.ModelRedirects = []contract.ModelRedirect{{From: "claude-opus-5-5", To: "claude-opus-5", Enabled: true}, {From: "claude-sonnet-5-5", To: "claude-sonnet-5.5", Enabled: false}}
+	if got, ok := service.UpstreamModelFor("claude-opus-5-5"); !ok || got != "claude-opus-5" {
+		t.Fatal("stored rule lost precedence")
+	}
+	if _, ok := service.UpstreamModelFor("claude-sonnet-5-5"); ok {
+		t.Fatal("disabled alias is routable")
 	}
 }

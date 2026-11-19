@@ -76,11 +76,13 @@ export function ServiceEditorTour({
   root,
   modelCount,
   protocols,
+  protocolHint,
 }: {
   root: RefObject<HTMLElement | null>;
   modelCount: number;
   /** Enabled entry protocols, shown as the clients they let in. */
   protocols: readonly string[];
+  protocolHint?: string;
 }) {
   const t = useT();
   const [settled, setSettled] = useState(false);
@@ -117,7 +119,7 @@ export function ServiceEditorTour({
       title: t("services.tabProtocols"),
       body: (
         <>
-          {t("services.editorTour.protocols")}
+          {protocolHint ?? t("services.editorTour.protocols")}
           <ClientSupport protocols={protocols} />
         </>
       ),

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import type { ClientConfigStatus } from "./client-config-model";
+import {
+  availableModels,
+  type ClientConfigStatus,
+} from "./client-config-model";
 import {
   autoFillClaude,
   defaultModel,
@@ -13,6 +16,7 @@ import {
   leadPlace,
   modelCandidates,
   modelProtocol,
+  modelService,
   newestGemini,
   newestModel,
   placeKey,
@@ -72,6 +76,32 @@ function status(overrides: Partial<ClientConfigStatus>): ClientConfigStatus {
 }
 
 describe("Claude Code model names", () => {
+  it("configures Claude with routable Kiro aliases and honors per-service overrides", () => {
+    const kiro = service({
+      kind: "kiro_subscription",
+      models: ["claude-sonnet-5.5", "claude-opus-5.5", "claude-haiku-5.5"],
+      capabilities: [
+        { protocol: "anthropic.messages", mode: "adapter", streaming: true },
+      ],
+      model_redirects: [
+        { from: "claude-haiku-5-5", to: "claude-haiku-5.5", enabled: false },
+      ],
+    });
+    const catalog = { services: [kiro], redirects: [] };
+    const candidates = modelCandidates(catalog, ["anthropic.messages"], null);
+    expect(autoFillClaude(candidates)).toEqual({
+      model: "claude-sonnet-5-5",
+      sonnetModel: "claude-sonnet-5-5",
+      opusModel: "claude-opus-5-5",
+      haikuModel: "claude-haiku-5.5",
+    });
+    expect(availableModels([kiro], [])).toEqual(new Set(candidates));
+    expect(
+      modelService(catalog, "claude-opus-5-5", "anthropic.messages", null),
+    ).toBe(kiro);
+    expect(candidates).not.toContain("claude-haiku-5-5");
+  });
+
   it("picks each family's newest model, preferring an alias over its snapshot", () => {
     const models = [
       "claude-sonnet-4-5-20250929",

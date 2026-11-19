@@ -73,6 +73,9 @@ func rateLimitKey(candidate Resolved) string {
 	plan := candidate.PlanType
 	if plan == "" {
 		plan = contract.PlanTypeNative
+		if candidate.Mode == contract.CapabilityModeAdapter {
+			plan = contract.PlanTypeAdapter
+		}
 		if candidate.Mode == contract.CapabilityModeDelegated {
 			plan = contract.PlanTypeDelegated
 		}

@@ -3,11 +3,14 @@ package ingress
 import (
 	"context"
 	"fmt"
-	"github.com/QuantumNous/astrlink/core/contract"
-	"github.com/QuantumNous/astrlink/core/internal/endpoint"
-	"github.com/QuantumNous/astrlink/core/internal/storage"
+	"slices"
 	"sync"
 	"time"
+
+	"github.com/QuantumNous/astrlink/core/contract"
+	"github.com/QuantumNous/astrlink/core/internal/endpoint"
+	"github.com/QuantumNous/astrlink/core/internal/providerapi"
+	"github.com/QuantumNous/astrlink/core/internal/storage"
 )
 
 type affinityEntry struct {
@@ -36,7 +39,7 @@ func (handler *Handler) rememberResponseAffinity(ctx context.Context, session *r
 	if model == "" {
 		model = session.classified.routingModel()
 	}
-	binding := storage.ResponseAffinity{ServiceID: candidate.CanonicalService().ID, UpstreamModel: model, UpstreamProtocol: plan.UpstreamProtocol, PlanType: plan.Type}
+	binding := storage.ResponseAffinity{ServiceID: candidate.CanonicalService().ID, UpstreamModel: model, UpstreamProtocol: plan.ProcessingProtocol(), PlanType: plan.Type}
 	key := affinityKey{string(principal), session.outputResponseID}
 	handler.affinities.mu.Lock()
 	if handler.affinities.entries == nil {
@@ -66,6 +69,11 @@ func (handler *Handler) rememberResponseAffinity(ctx context.Context, session *r
 func (handler *Handler) bindResponseAffinity(ctx context.Context, request Request, candidates []endpoint.Resolved) ([]endpoint.Resolved, error) {
 	if request.PreviousResponseID == "" || (request.Protocol != contract.ProtocolOpenAIResponses && request.Protocol != contract.ProtocolOpenAIResponsesCompact) {
 		return candidates, nil
+	}
+	if len(candidates) > 0 && !slices.ContainsFunc(candidates, func(c endpoint.Resolved) bool {
+		return c.CanonicalService().Kind != contract.ServiceKindKiroSubscription
+	}) {
+		return nil, providerapi.KiroContinuationError()
 	}
 	principal, _ := AccessTokenIDFromContext(ctx)
 	key := affinityKey{string(principal), request.PreviousResponseID}
@@ -105,6 +113,9 @@ func (handler *Handler) bindResponseAffinity(ctx context.Context, request Reques
 				if candidate.Mode == contract.CapabilityModeDelegated {
 					planType = contract.PlanTypeDelegated
 				}
+			}
+			if candidate.CanonicalService().ID == binding.ServiceID && candidate.CanonicalService().Kind == contract.ServiceKindKiroSubscription {
+				return nil, providerapi.KiroContinuationError()
 			}
 			compatibleProtocol := protocol == binding.UpstreamProtocol || (protocol == contract.ProtocolOpenAIResponsesCompact && binding.UpstreamProtocol == contract.ProtocolOpenAIResponses)
 			if candidate.CanonicalService().ID == binding.ServiceID && model == binding.UpstreamModel && compatibleProtocol && planType == binding.PlanType {

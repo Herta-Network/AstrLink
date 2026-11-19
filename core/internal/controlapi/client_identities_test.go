@@ -42,6 +42,7 @@ func TestClientIdentitiesReportLearnedAndBuiltinVersions(t *testing.T) {
 		Codex:  contract.ClientIdentityStatus{BuiltinVersion: accountauth.DefaultCodexModelsClientVersion},
 		Claude: contract.ClientIdentityStatus{BuiltinVersion: accountauth.DefaultClaudeIdentity().Version},
 		Grok:   contract.ClientIdentityStatus{BuiltinVersion: accountauth.DefaultGrokCLIClientVersion},
+		Kiro:   contract.ClientIdentityStatus{BuiltinVersion: accountauth.DefaultKiroClientVersion},
 	}
 	if body != builtin {
 		t.Fatalf("before learning = %+v", body)

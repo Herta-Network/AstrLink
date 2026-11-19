@@ -39,7 +39,7 @@ func TestNoLoopbackCallbackSignsCodexInWithADeviceCode(t *testing.T) {
 		FallbackPort:       fallback,
 		NoLoopbackCallback: true,
 	}, accountauth.NewMemoryCredentialStore(), nil)
-	session, err := manager.Begin(context.Background(), "service_codex_server", contract.AuthorizationFlowBrowser)
+	session, err := manager.Begin(context.Background(), "service_codex_server", contract.AuthorizationFlowBrowser, nil)
 	if err != nil {
 		t.Fatalf("Begin() = %v", err)
 	}
@@ -63,7 +63,7 @@ func TestNoLoopbackCallbackRefusesAntigravityBrowserSignIn(t *testing.T) {
 		Provider:           contract.SubscriptionProviderAntigravity,
 		NoLoopbackCallback: true,
 	}, accountauth.NewMemoryCredentialStore(), nil)
-	_, err := manager.Begin(context.Background(), "service_antigravity_server", contract.AuthorizationFlowBrowser)
+	_, err := manager.Begin(context.Background(), "service_antigravity_server", contract.AuthorizationFlowBrowser, nil)
 	if !errors.Is(err, accountauth.ErrLoopbackCallbackUnavailable) {
 		t.Fatalf("Begin() = %v, want ErrLoopbackCallbackUnavailable", err)
 	}

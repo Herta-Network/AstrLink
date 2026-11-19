@@ -74,3 +74,74 @@ func TestClaudeCodeModelFailsOverToCopilotUnderItsDottedName(t *testing.T) {
 		t.Fatalf("attempts = %v, models = %v", hosts, models)
 	}
 }
+
+func TestKiroClaude55AliasIsDiscoverableAndReachesBothRuntimeAPIs(t *testing.T) {
+	kiro := kiroSettingsCandidate("service_kiro", "").Service
+	kiro.Models = []string{"claude-sonnet-5.5", "claude-haiku-5.5"}
+	kiro.ModelRedirects = []contract.ModelRedirect{{From: "claude-haiku-5-5", To: "claude-haiku-5.5", Enabled: false}}
+	// A second provider listing Opus must not activate Kiro's Opus alias.
+	droid := contract.Service{ID: "service_droid", Name: "Droid", Enabled: true, Kind: contract.ServiceKindDroidSubscription,
+		Models: []string{"claude-opus-5.5"}, Capabilities: contract.SubscriptionProviderFactoryDroid.Capabilities(),
+		Subscription: &contract.SubscriptionConnection{Provider: contract.SubscriptionProviderFactoryDroid, Status: contract.SubscriptionStatusConnected, CredentialRef: "local://subscription/service_droid"}}
+	resolver, err := endpoint.NewStoreResolver(redirectServices{kiro, droid})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls int
+	handler := NewWithDependencies(Dependencies{ResolveKiro: kiroTestTokenLimit,
+		Resolver: resolver, Authorizer: endpoint.NewServiceAuthorizer(codingPlanCredentials{}, codingPlanCredentials{}),
+		Forwarder: transport.New(roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			calls++
+			body, err := io.ReadAll(req.Body)
+			if err != nil {
+				return nil, err
+			}
+			var payload, media, model string
+			switch req.URL.Path {
+			case "/":
+				if req.Header.Get("X-Amz-Target") != "AmazonCodeWhispererStreamingService.GenerateAssistantResponse" {
+					t.Error("expected GAR")
+				}
+				model = ojson.GetBytes(body, "conversationState.currentMessage.userInputMessage.modelId").String()
+				media = "application/vnd.amazon.eventstream"
+				payload = string(kiroOKFrames())
+			case "/v1/responses":
+				model = ojson.GetBytes(body, "model").String()
+				media = "text/event-stream"
+				payload = "data: " + `{"type":"response.completed","response":{"id":"resp_test","status":"completed","output":[]}}` + "\n\n"
+			default:
+				t.Fatalf("unexpected upstream request %s", req.URL.Path)
+			}
+			if model != "claude-sonnet-5.5" {
+				t.Errorf("upstream model = %q", model)
+			}
+			return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {media}}, Body: io.NopCloser(strings.NewReader(payload))}, nil
+		})),
+	})
+	list := httptest.NewRecorder()
+	handler.ServeHTTP(list, httptest.NewRequest("GET", "/v1/models", nil))
+	entries := ojson.GetBytes(list.Body.Bytes(), "data")
+	if list.Code != 200 || calls != 0 || len(entries.Array()) != 4 {
+		t.Fatalf("catalog: %d %s", list.Code, list.Body.String())
+	}
+	for _, id := range []string{"claude-sonnet-5-5", "claude-sonnet-5.5", "claude-haiku-5.5", "claude-opus-5.5"} {
+		if !entries.Get(`#(id=="` + id + `")`).Exists() {
+			t.Errorf("missing catalog entry %s", id)
+		}
+	}
+	for _, tc := range []struct{ path, body string }{
+		{"/v1/messages", `{"model":"claude-sonnet-5-5","messages":[{"role":"user","content":"test"}],"max_tokens":128}`},
+		{"/v1/responses", `{"model":"claude-sonnet-5-5","input":"test"}`},
+	} {
+		req := httptest.NewRequest("POST", tc.path, strings.NewReader(tc.body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != 200 {
+			t.Errorf("%s: %d %s", tc.path, w.Code, w.Body.String())
+		}
+	}
+	if calls != 2 {
+		t.Fatalf("upstream calls = %d", calls)
+	}
+}

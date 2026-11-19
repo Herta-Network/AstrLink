@@ -66,14 +66,18 @@ var (
 // It defaults to the official public Codex OAuth client and registered
 // localhost callback ports.
 type OAuthConfig struct {
-	Provider        contract.SubscriptionProvider
-	AuthorizeURL    string
-	TokenURL        string
-	CodeRedirectURI string
-	ClientID        string
-	ClientSecret    string
-	ProjectBaseURL  string
-	UserInfoURL     string
+	// Kiro endpoint overrides are internal/test configuration, never user-supplied URLs.
+	KiroSocialBaseURL string
+	KiroPortalURL     string
+	KiroCallbackPort  *int
+	Provider          contract.SubscriptionProvider
+	AuthorizeURL      string
+	TokenURL          string
+	CodeRedirectURI   string
+	ClientID          string
+	ClientSecret      string
+	ProjectBaseURL    string
+	UserInfoURL       string
 	// UsageURL is the provider's plan and quota endpoint read with the
 	// account's token (GitHub Copilot's /copilot_internal/user).
 	UsageURL              string
@@ -127,6 +131,9 @@ func (config OAuthConfig) normalized() OAuthConfig {
 	}
 	if config.Provider == contract.SubscriptionProviderFactoryDroid {
 		config = normalizeDroidConfig(config)
+	}
+	if config.Provider == contract.SubscriptionProviderKiro {
+		config = normalizeKiroConfig(config)
 	}
 	if strings.TrimSpace(config.ClientID) == "" {
 		config.ClientID = DefaultCodexOAuthClientID
@@ -252,6 +259,9 @@ func (client *TokenClient) ExchangeCode(ctx context.Context, code, verifier, red
 // RefreshAccount renews current's tokens. Providers whose refresh needs more
 // than the refresh token (Factory's organization) read it from current.
 func (client *TokenClient) RefreshAccount(ctx context.Context, current AccountTokens) (AccountTokens, error) {
+	if client.config.Provider == contract.SubscriptionProviderKiro {
+		return client.refreshKiro(ctx, current)
+	}
 	if client.config.Provider == contract.SubscriptionProviderFactoryDroid {
 		return client.refreshDroid(ctx, current)
 	}
@@ -259,6 +269,9 @@ func (client *TokenClient) RefreshAccount(ctx context.Context, current AccountTo
 }
 
 func (client *TokenClient) Refresh(ctx context.Context, refreshToken string) (AccountTokens, error) {
+	if client.config.Provider == contract.SubscriptionProviderKiro {
+		return AccountTokens{}, ErrInvalidGrant
+	}
 	if client.config.Provider == contract.SubscriptionProviderGitHubCopilot {
 		return client.refreshCopilot(ctx, refreshToken)
 	}

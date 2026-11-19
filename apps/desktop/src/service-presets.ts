@@ -190,6 +190,9 @@ export const alphaProtocolDescriptors: readonly ProtocolDescriptor[] = [
 ];
 
 export const protocolLabels: Readonly<Record<string, string>> = {
+  "kiro.create_response": "Kiro CreateResponse",
+  "kiro.generate_assistant_response": "Kiro GenerateAssistantResponse",
+  "local.models": "Local model catalog",
   "openai.responses": "OpenAI Responses",
   "openai.responses.compact": "Responses Compact",
   "anthropic.messages": "Anthropic Messages",

@@ -37,6 +37,7 @@ export const identitySettingKeys = [
   "codex_identity_enforcement",
   "claude_identity_enforcement",
   "grok_identity_enforcement",
+  "kiro_identity_enforcement",
 ] as const;
 export type IdentitySettingKey = (typeof identitySettingKeys)[number];
 
@@ -54,6 +55,7 @@ export const identityLearningKeys = [
   "codex_identity_auto_learn",
   "claude_identity_auto_learn",
   "grok_identity_auto_learn",
+  "kiro_identity_auto_learn",
 ] as const;
 export type IdentityLearningKey = (typeof identityLearningKeys)[number];
 
@@ -61,6 +63,7 @@ export const identityVersionKeys = [
   "codex_identity_version",
   "claude_identity_version",
   "grok_identity_version",
+  "kiro_identity_version",
 ] as const;
 export type IdentityVersionKey = (typeof identityVersionKeys)[number];
 
@@ -259,6 +262,7 @@ export interface RoutingSettings {
   codex_identity_enforcement?: boolean;
   claude_identity_enforcement?: boolean;
   grok_identity_enforcement?: boolean;
+  kiro_identity_enforcement?: boolean;
   official_client_passthrough?: boolean;
   subscription_risk_protection?: boolean;
   codex_request_normalization?: boolean;
@@ -267,10 +271,12 @@ export interface RoutingSettings {
   codex_identity_auto_learn?: boolean;
   claude_identity_auto_learn?: boolean;
   grok_identity_auto_learn?: boolean;
+  kiro_identity_auto_learn?: boolean;
   /** Minimum declared client version; absent when no override is set. */
   codex_identity_version?: string;
   claude_identity_version?: string;
   grok_identity_version?: string;
+  kiro_identity_version?: string;
   /**
    * Adds the prefix and suffix to the system prompt of inference requests when
    * on. Claude Code's Haiku requests keep their own prompt.
@@ -504,7 +510,7 @@ export function parseModelRedirects(value: unknown): ModelRedirect[] {
   return redirects;
 }
 
-export type LearnedClient = "codex" | "claude" | "grok";
+export type LearnedClient = "codex" | "claude" | "grok" | "kiro";
 
 /** A client's version learned from official requests and its built-in one. */
 export interface ClientIdentityStatus {
@@ -513,11 +519,14 @@ export interface ClientIdentityStatus {
   builtin_version: string;
 }
 
-export type ClientIdentities = Record<LearnedClient, ClientIdentityStatus>;
+export type ClientIdentities = Record<
+  Exclude<LearnedClient, "kiro">,
+  ClientIdentityStatus
+> & { kiro?: ClientIdentityStatus };
 
 export function parseClientIdentities(value: unknown): ClientIdentities {
   const identities = object(value, "client_identities");
-  keys(identities, ["codex", "claude", "grok"], [], "client_identities");
+  keys(identities, ["codex", "claude", "grok"], ["kiro"], "client_identities");
   const parse = (client: LearnedClient): ClientIdentityStatus => {
     const path = `client_identities.${client}`;
     const status = object(identities[client], path);
@@ -543,6 +552,7 @@ export function parseClientIdentities(value: unknown): ClientIdentities {
     codex: parse("codex"),
     claude: parse("claude"),
     grok: parse("grok"),
+    ...(Object.hasOwn(identities, "kiro") ? { kiro: parse("kiro") } : {}),
   };
 }
 

@@ -34,18 +34,19 @@ type ServiceModelProber interface {
 }
 
 type serviceCreateRequest struct {
-	Proxy                     json.RawMessage         `json:"proxy,omitempty"`
-	ResponsesWebSocketEnabled json.RawMessage         `json:"responses_websocket_enabled,omitempty"`
-	ModelRedirects            json.RawMessage         `json:"model_redirects,omitempty"`
-	ModelProtocols            json.RawMessage         `json:"model_protocols,omitempty"`
-	FailurePolicy             *contract.FailurePolicy `json:"failure_policy,omitempty"`
-	Name                      string                  `json:"name"`
-	Kind                      *contract.ServiceKind   `json:"kind"`
-	Enabled                   json.RawMessage         `json:"enabled,omitempty"`
-	PrivacyTrusted            json.RawMessage         `json:"privacy_trusted,omitempty"`
-	Models                    json.RawMessage         `json:"models,omitempty"`
-	HTTP                      json.RawMessage         `json:"http,omitempty"`
-	Capabilities              json.RawMessage         `json:"capabilities,omitempty"`
+	KiroImport                *contract.KiroSocialGrant `json:"kiro_import,omitempty"`
+	Proxy                     json.RawMessage           `json:"proxy,omitempty"`
+	ResponsesWebSocketEnabled json.RawMessage           `json:"responses_websocket_enabled,omitempty"`
+	ModelRedirects            json.RawMessage           `json:"model_redirects,omitempty"`
+	ModelProtocols            json.RawMessage           `json:"model_protocols,omitempty"`
+	FailurePolicy             *contract.FailurePolicy   `json:"failure_policy,omitempty"`
+	Name                      string                    `json:"name"`
+	Kind                      *contract.ServiceKind     `json:"kind"`
+	Enabled                   json.RawMessage           `json:"enabled,omitempty"`
+	PrivacyTrusted            json.RawMessage           `json:"privacy_trusted,omitempty"`
+	Models                    json.RawMessage           `json:"models,omitempty"`
+	HTTP                      json.RawMessage           `json:"http,omitempty"`
+	Capabilities              json.RawMessage           `json:"capabilities,omitempty"`
 	// SubscriptionMode picks how a Claude subscription signs in; without it a
 	// new Claude subscription is official.
 	SubscriptionMode *contract.SubscriptionMode `json:"subscription_mode,omitempty"`
@@ -145,6 +146,7 @@ func credentialHint(secret []byte) string {
 }
 
 type authorizationStartRequest struct {
+	Kiro *contract.KiroAuthorization `json:"kiro,omitempty"`
 	Flow *contract.AuthorizationFlow `json:"flow"`
 }
 
@@ -222,6 +224,8 @@ func (handler *Handler) serviceItem(writer http.ResponseWriter, request *http.Re
 	}
 	if len(parts) == 2 {
 		switch parts[1] {
+		case "kiro-import":
+			handler.importExistingKiro(writer, request, id)
 		case "authorization":
 			handler.serviceAuthorization(writer, request, id)
 		case "logout":
@@ -312,6 +316,13 @@ func (handler *Handler) createService(writer http.ResponseWriter, request *http.
 		return
 	}
 	id, err := handler.newServiceID()
+	if input.KiroImport != nil {
+		if *input.Kind != contract.ServiceKindKiroSubscription || !input.KiroImport.Valid() {
+			writeError(writer, http.StatusUnprocessableEntity, "invalid_kiro_import", "choose a Google or GitHub Kiro credential file")
+			return
+		}
+		id = kiroImportServiceID(input.KiroImport.RefreshToken)
+	}
 	if err != nil || id.Validate() != nil {
 		writeError(writer, http.StatusInternalServerError, "service_id_unavailable", "could not allocate a service id")
 		return
@@ -423,6 +434,10 @@ func (handler *Handler) createService(writer http.ResponseWriter, request *http.
 	}
 	if err := applyServiceProxyInput(&service, &credential, input.Proxy); err != nil {
 		writeError(writer, http.StatusUnprocessableEntity, "invalid_service_proxy", err.Error())
+		return
+	}
+	if input.KiroImport != nil {
+		handler.importKiroGrant(writer, request, service, credential, *input.KiroImport, "")
 		return
 	}
 	record, err := handler.serviceStore.CreateService(request.Context(), service, credential)
@@ -542,7 +557,12 @@ func (handler *Handler) serviceAuthorization(writer http.ResponseWriter, request
 		if mode == contract.SubscriptionModeOfficial {
 			defaultFlow = contract.AuthorizationFlowClaudeCLI
 		}
-		flow, ok := decodeAuthorizationFlow(writer, request, defaultFlow)
+		var kiroOptions *contract.KiroAuthorization
+		if current.Service.Kind == contract.ServiceKindKiroSubscription {
+			defaultFlow = contract.AuthorizationFlowDeviceCode
+			kiroOptions = &contract.KiroAuthorization{}
+		}
+		flow, ok := decodeAuthorizationFlow(writer, request, defaultFlow, kiroOptions)
 		if !ok {
 			return
 		}
@@ -550,7 +570,7 @@ func (handler *Handler) serviceAuthorization(writer http.ResponseWriter, request
 			writeError(writer, http.StatusUnprocessableEntity, "invalid_authorization_flow", "authorization flow is unsupported by this provider")
 			return
 		}
-		session, err := handler.subscriptions.BeginAuthorization(request.Context(), id, flow)
+		session, err := handler.subscriptions.BeginAuthorization(request.Context(), id, flow, kiroOptions)
 		if err != nil {
 			switch {
 			case errors.Is(err, subscription.ErrCredentialUnavailable), errors.Is(err, accountauth.ErrCredentialStoreUnavailable):
@@ -646,6 +666,7 @@ func decodeAuthorizationFlow(
 	writer http.ResponseWriter,
 	request *http.Request,
 	defaultFlow contract.AuthorizationFlow,
+	kiro *contract.KiroAuthorization,
 ) (contract.AuthorizationFlow, bool) {
 	request.Body = http.MaxBytesReader(writer, request.Body, maxControlBodyBytes)
 	raw, err := io.ReadAll(request.Body)
@@ -697,6 +718,22 @@ func decodeAuthorizationFlow(
 			"flow must be browser or device_code",
 		)
 		return "", false
+	}
+	if input.Kiro != nil && kiro == nil {
+		writeError(writer, http.StatusUnprocessableEntity, "invalid_authorization_flow", "Kiro options require a Kiro subscription")
+		return "", false
+	}
+	if kiro != nil {
+		options := contract.KiroAuthorization{}
+		if input.Kiro != nil {
+			options = *input.Kiro
+		}
+		normalized, err := options.Normalize(flow)
+		if err != nil {
+			writeError(writer, http.StatusUnprocessableEntity, "invalid_kiro_authorization", err.Error())
+			return "", false
+		}
+		*kiro = normalized
 	}
 	return flow, true
 }

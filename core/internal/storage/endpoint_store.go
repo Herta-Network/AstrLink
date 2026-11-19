@@ -41,6 +41,8 @@ type EndpointPage struct {
 // CredentialMutation distinguishes an omitted credential update from explicit
 // deletion. Secret bytes never enter the Endpoint JSON document.
 type CredentialMutation struct {
+	// Subscription holds marshaled OAuth tokens to seal in the service transaction.
+	Subscription []byte `json:"-"`
 	ProxyPresent bool
 	Proxy        *contract.ProxyCredential
 	Present      bool

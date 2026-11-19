@@ -64,8 +64,13 @@ export const coreCommands = {
     Services.probeDraftServiceModels(a.input),
   probe_service_proxy: (a: { input: unknown }) =>
     Services.probeServiceProxy(a.input),
-  begin_service_authorization: (a: { serviceId: string; flow: string }) =>
-    Services.beginServiceAuthorization(a.serviceId, a.flow),
+  import_kiro_file: (a: { serviceId: string; create: unknown | null }) =>
+    Services.importKiroFile(a.serviceId, a.create),
+  begin_service_authorization: (a: {
+    serviceId: string;
+    flow: string;
+    kiro?: unknown;
+  }) => Services.beginServiceAuthorization(a.serviceId, a.flow, a.kiro ?? null),
   get_service_authorization: (a: { serviceId: string }) =>
     Services.getServiceAuthorization(a.serviceId),
   complete_service_authorization: (a: {

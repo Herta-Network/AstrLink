@@ -175,7 +175,8 @@ func parseAuthorizationSessionValue(value any) (object, error) {
 		return nil, err
 	}
 	unsupported := errors.New("authorization flow is unsupported by provider")
-	if (provider == "claude_code") != (flow == "authorization_code" || flow == "claude_cli") {
+	if provider == "claude_code" && flow != "authorization_code" && flow != "claude_cli" ||
+		provider != "claude_code" && (flow == "claude_cli" || flow == "authorization_code" && provider != "kiro") {
 		return nil, unsupported
 	}
 	if provider == "antigravity" && flow != "browser" {

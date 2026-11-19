@@ -2,6 +2,7 @@ import {
   maxPiLimit,
   type BuiltinClient,
   serviceUsable,
+  clientModelIDs,
   type ClientCatalogEntry,
   type ClientConfigClient,
   type ClientConfigModels,
@@ -94,7 +95,7 @@ export function modelService(
     )?.to ?? modelID;
   const candidates = catalog.services.filter(
     (service) =>
-      service.models.includes(upstreamModel) &&
+      clientModelIDs(service).includes(upstreamModel) &&
       supportsEntry(service, protocol, engine),
   );
   return (
@@ -132,19 +133,22 @@ export function modelCandidates(
         protocolCarries(protocol, model) &&
         supportsEntry(service, protocol, engine),
     );
+  const serviceModels = catalog.services.map((service) => ({
+    service,
+    ids: clientModelIDs(service),
+  }));
   const models = [
-    ...catalog.services.flatMap((service) =>
-      service.models.filter((model) => reaches(service, model)),
+    ...serviceModels.flatMap(({ service, ids }) =>
+      ids.filter((model) => reaches(service, model)),
     ),
     ...catalog.redirects
       .filter(
         (redirect) =>
           redirect.enabled &&
           redirect.from !== astrlinkAutoModelId &&
-          catalog.services.some(
-            (service) =>
-              service.models.includes(redirect.to) &&
-              reaches(service, redirect.from),
+          serviceModels.some(
+            ({ service, ids }) =>
+              ids.includes(redirect.to) && reaches(service, redirect.from),
           ),
       )
       .map((redirect) => redirect.from),

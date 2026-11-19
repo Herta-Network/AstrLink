@@ -185,6 +185,7 @@ const providerBrands: Record<SubscriptionProvider, string> = {
   antigravity: "Antigravity",
   github_copilot: "Copilot",
   factory_droid: "Droid",
+  kiro: "Kiro",
 };
 
 /** Cards stay at least this wide; the grid drops a column below it. */

@@ -182,7 +182,7 @@ func testPayload(kind contract.ServiceKind, input contract.ServiceTestRequest) (
 		body["input"] = []any{map[string]any{"role": "user", "content": []any{map[string]string{"type": "input_text", "text": prompt}}}}
 		body["store"] = false
 		body["instructions"] = "This is a connection test. Reply briefly."
-		if kind == contract.ServiceKindCodexSubscription {
+		if kind == contract.ServiceKindCodexSubscription || kind == contract.ServiceKindKiroSubscription {
 			return "/v1/responses", body
 		}
 		body["max_output_tokens"] = 1024
@@ -190,7 +190,11 @@ func testPayload(kind contract.ServiceKind, input contract.ServiceTestRequest) (
 	case contract.ProtocolOpenAIChat, contract.ProtocolAnthropicMessages:
 		body["messages"] = []any{map[string]string{"role": "user", "content": prompt}}
 		if input.Protocol == contract.ProtocolAnthropicMessages {
-			body["max_tokens"] = 1024
+			// A Kiro connection probe has no caller-provided cap, and not all
+			// catalog models expose a per-request max_tokens field.
+			if kind != contract.ServiceKindKiroSubscription {
+				body["max_tokens"] = 1024
+			}
 			if kind == contract.ServiceKindClaudeSubscription {
 				body["system"] = "You are Claude Code, Anthropic's official CLI for Claude."
 			}

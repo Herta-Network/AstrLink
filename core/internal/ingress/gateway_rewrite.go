@@ -3,6 +3,7 @@ package ingress
 import (
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 
@@ -79,6 +80,7 @@ type gatewayReasoning struct {
 func (handler *Handler) applyGatewayRewrite(
 	request *http.Request,
 	protocol contract.ProtocolID,
+	kind contract.ServiceKind,
 	rewrite gatewayRewrite,
 	haiku bool,
 ) (gatewayReasoning, error) {
@@ -110,6 +112,10 @@ func (handler *Handler) applyGatewayRewrite(
 		if target, ok := reasoningTargetFor(rewrite.reasoning, protocol, body); ok {
 			model := upstreamRequestModel(request, protocol, body)
 			edit := overrideReasoning(protocol, body, model, target, handler.codexModels.lookup(model))
+			if edit.err == nil && kind == contract.ServiceKindKiroSubscription && protocol == contract.ProtocolAnthropicMessages && slices.Contains(edit.changed, "max_tokens") {
+				edit.body, edit.err = preserveKiroOutputLimit(protocol, raw, edit.body)
+				edit.changed = slices.DeleteFunc(edit.changed, func(path string) bool { return path == "max_tokens" })
+			}
 			if edit.err != nil {
 				edit = reasoningEdit{kept: "body could not be edited"}
 			} else {

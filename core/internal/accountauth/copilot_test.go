@@ -118,11 +118,11 @@ func TestCopilotDeviceCodeLoginStoresTheGitHubTokenAsOpenCode(t *testing.T) {
 		return store.Put(ctx, session.ServiceID, tokens)
 	})
 	for _, flow := range []contract.AuthorizationFlow{contract.AuthorizationFlowBrowser, contract.AuthorizationFlowCode} {
-		if _, err := manager.Begin(context.Background(), "service_copilot", flow); err == nil {
+		if _, err := manager.Begin(context.Background(), "service_copilot", flow, nil); err == nil {
 			t.Fatalf("%s flow accepted for Copilot", flow)
 		}
 	}
-	session, err := manager.Begin(context.Background(), "service_copilot", contract.AuthorizationFlowDeviceCode)
+	session, err := manager.Begin(context.Background(), "service_copilot", contract.AuthorizationFlowDeviceCode, nil)
 	if err != nil {
 		t.Fatalf("Begin() = %v", err)
 	}
@@ -173,7 +173,7 @@ func TestCopilotLoginFailsWithoutAPlanOrApproval(t *testing.T) {
 			manager := accountauth.NewSessionManager(copilotTestConfig(server), store, func(ctx context.Context, session contract.AuthorizationSession, tokens accountauth.AccountTokens) error {
 				return store.Put(ctx, session.ServiceID, tokens)
 			})
-			if _, err := manager.Begin(context.Background(), "service_copilot", contract.AuthorizationFlowDeviceCode); err != nil {
+			if _, err := manager.Begin(context.Background(), "service_copilot", contract.AuthorizationFlowDeviceCode, nil); err != nil {
 				t.Fatalf("Begin() = %v", err)
 			}
 			waitForSessionStatus(t, manager, "service_copilot", contract.AuthorizationSessionStatusFailed)

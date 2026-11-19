@@ -2,12 +2,18 @@ package ingress
 
 import (
 	"context"
-	"github.com/QuantumNous/astrlink/core/contract"
-	"github.com/QuantumNous/astrlink/core/internal/transport"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/QuantumNous/astrlink/core/contract"
+	"github.com/QuantumNous/astrlink/core/internal/endpoint"
+	"github.com/QuantumNous/astrlink/core/internal/providerapi"
+	"github.com/QuantumNous/astrlink/core/internal/storage"
+	"github.com/QuantumNous/astrlink/core/internal/transport"
 )
 
 func TestResponseAffinityFollowsActualBackupAndIsolatesPrincipals(t *testing.T) {
@@ -53,5 +59,29 @@ func TestResponseAffinityFollowsActualBackupAndIsolatesPrincipals(t *testing.T) 
 	continuation.PreviousResponseID = "unknown"
 	if _, err := handler.bindResponseAffinity(context.Background(), continuation, candidates[:1]); err == nil {
 		t.Fatal("unknown previous response accepted")
+	}
+}
+
+func TestKiroContinuationDoesNotConsumeOtherProvidersResponseIDs(t *testing.T) {
+	h := NewWithDependencies(Dependencies{})
+	kiro := kiroSettingsCandidate("service_kiro", "")
+	kiro.UpstreamProtocol = contract.ProtocolOpenAIResponses
+	other := endpoint.Resolved{Service: contract.Service{ID: "service_native", Kind: contract.ServiceKindOpenAICompatible}, UpstreamProtocol: contract.ProtocolOpenAIResponses, PlanType: contract.PlanTypeNative}
+	req := Request{Protocol: contract.ProtocolOpenAIResponses, Model: "m", PreviousResponseID: "resp_test"}
+	candidates := []endpoint.Resolved{kiro, other}
+	key := affinityKey{"", req.PreviousResponseID}
+	h.affinities.entries = map[affinityKey]affinityEntry{key: {at: time.Now(), binding: storage.ResponseAffinity{ServiceID: other.Service.ID, UpstreamModel: "m", UpstreamProtocol: other.UpstreamProtocol, PlanType: contract.PlanTypeNative}}}
+	selected, err := h.bindResponseAffinity(t.Context(), req, candidates)
+	if err != nil || len(selected) != 1 || selected[0].Service.ID != other.Service.ID {
+		t.Fatalf("lost native affinity: %v, %v", selected, err)
+	}
+	entry := h.affinities.entries[key]
+	entry.binding.ServiceID = kiro.Service.ID
+	entry.binding.PlanType = contract.PlanTypeAdapter
+	h.affinities.entries[key] = entry
+	_, err = h.bindResponseAffinity(t.Context(), req, candidates)
+	var param *providerapi.KiroParameterError
+	if !errors.As(err, &param) || param.Field != "previous_response_id" {
+		t.Fatalf("wrong Kiro continuation error: %v", err)
 	}
 }

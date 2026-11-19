@@ -187,7 +187,10 @@ func (source *TokenSource) refresh(ctx context.Context, accountID contract.Subsc
 	if refreshed.AccountID == "" {
 		refreshed.AccountID = current.AccountID
 	}
-	refreshed.ProjectID, refreshed.PlanType = current.ProjectID, current.PlanType
+	if source.client.config.Provider != contract.SubscriptionProviderKiro || refreshed.ProjectID == "" {
+		refreshed.ProjectID = current.ProjectID
+	}
+	refreshed.PlanType = current.PlanType
 	if refreshed.Region == "" {
 		refreshed.Region = current.Region
 	}

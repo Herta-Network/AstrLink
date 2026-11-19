@@ -318,3 +318,12 @@ func TestUpstreamErrorMessageShapes(t *testing.T) {
 		}
 	}
 }
+
+func TestKiroProbeDoesNotImposeAnUnsupportedOutputLimit(t *testing.T) {
+	for _, p := range []contract.ProtocolID{contract.ProtocolAnthropicMessages, contract.ProtocolOpenAIResponses} {
+		_, body := testPayload(contract.ServiceKindKiroSubscription, contract.ServiceTestRequest{Model: "m", Protocol: p})
+		if body["max_tokens"] != nil || body["max_output_tokens"] != nil {
+			t.Fatalf("%s probe has unsupported cap", p)
+		}
+	}
+}

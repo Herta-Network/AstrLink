@@ -68,7 +68,7 @@ func (store *Store) CreateService(
 			return record, err
 		}
 	}
-	if err = store.putProxyCredentialTx(ctx, transaction, service, credential); err != nil {
+	if err = store.putServiceSecretsTx(ctx, transaction, service, credential); err != nil {
 		return record, err
 	}
 	if err = transaction.Commit(); err != nil {
@@ -212,7 +212,7 @@ func (store *Store) UpdateService(
 			return record, err
 		}
 	}
-	if err = store.putProxyCredentialTx(ctx, transaction, service, credential); err != nil {
+	if err = store.putServiceSecretsTx(ctx, transaction, service, credential); err != nil {
 		return record, err
 	}
 	if err = transaction.Commit(); err != nil {
@@ -319,6 +319,7 @@ func decodeServiceRecord(id string, document []byte) (storagecontract.ServiceRec
 	if string(service.ID) != id {
 		return storagecontract.ServiceRecord{}, fmt.Errorf("%w: service id mismatch", storagecontract.ErrInvalidRecord)
 	}
+	upgradeKiroCapabilities(&service)
 	if err := service.Validate(); err != nil {
 		return storagecontract.ServiceRecord{}, fmt.Errorf("%w: service %q: %v", storagecontract.ErrInvalidRecord, id, err)
 	}
@@ -339,3 +340,40 @@ func decodeServiceCursor(cursor string) (contract.ServiceID, error) {
 }
 
 var _ storagecontract.ServiceStore = (*Store)(nil)
+
+func (store *Store) putServiceSecretsTx(ctx context.Context, transaction *sql.Tx, service contract.Service, credential storagecontract.CredentialMutation) error {
+	if credential.Subscription != nil {
+		if !service.Kind.IsSubscription() || service.Subscription.Status != contract.SubscriptionStatusConnected ||
+			service.Subscription.CredentialRef != subscriptionRefPrefix+string(service.ID) {
+			return fmt.Errorf("%w: invalid subscription credential target", storagecontract.ErrInvalidArgument)
+		}
+		if err := store.putSubscriptionCredential(ctx, transaction, service.ID, credential.Subscription); err != nil {
+			return err
+		}
+	}
+	return store.putProxyCredentialTx(ctx, transaction, service, credential)
+}
+
+// Older saved and synced Kiro services omitted Responses or configured it as a
+// conversion to Messages. Enabled Chat rows also used to target Messages.
+// Preserve disabled entries, streaming preferences and the on-disk ETag.
+func upgradeKiroCapabilities(service *contract.Service) {
+	if service.Kind == contract.ServiceKindKiroSubscription {
+		direct := contract.Capability{Protocol: contract.ProtocolOpenAIResponses, Mode: contract.CapabilityModeAdapter, Streaming: true}
+		found := false
+		for i, row := range service.Capabilities {
+			if row.Protocol == contract.ProtocolOpenAIChat && row.Mode == direct.Mode && row.ConvertTo == contract.ProtocolAnthropicMessages {
+				service.Capabilities[i].ConvertTo = contract.ProtocolOpenAIResponses
+			}
+			if row.Protocol == direct.Protocol {
+				found = true
+				if row.Mode == direct.Mode && row.ConvertTo == contract.ProtocolAnthropicMessages {
+					service.Capabilities[i] = direct
+				}
+			}
+		}
+		if !found {
+			service.Capabilities = append(service.Capabilities, direct)
+		}
+	}
+}

@@ -446,6 +446,7 @@ export function parseSubscriptionUsageReset(
 
 const planTypeLabels: Record<SubscriptionProvider, Record<string, string>> = {
   antigravity: {},
+  kiro: { free: "Free", pro: "Pro", pro_plus: "Pro+", power: "Power" },
   factory_droid: {
     free: "Free",
     starter: "Starter",

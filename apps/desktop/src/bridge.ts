@@ -1,3 +1,4 @@
+import type { KiroAuthorization } from "./subscription-model";
 import { isWebEdition } from "./edition";
 import { webInvoke, RAW_CHANGED } from "./web-transport";
 import {
@@ -550,6 +551,18 @@ export async function getService(serviceId: string): Promise<ServiceRecord> {
   );
 }
 
+export async function importKiroFile(
+  serviceId: string,
+  create: ServiceCreateInput | null,
+): Promise<ServiceRecord | null> {
+  requireNativeBridge();
+  const result = await invoke<unknown>("import_kiro_file", {
+    serviceId,
+    create,
+  });
+  return result === null ? null : parseServiceRecord(result);
+}
+
 export async function createService(
   input: ServiceCreateInput,
 ): Promise<ServiceRecord> {
@@ -705,10 +718,15 @@ export async function probeServiceProxy(
 export async function beginServiceAuthorization(
   serviceId: string,
   flow: AuthorizationFlow,
+  kiro?: KiroAuthorization,
 ): Promise<BeginCodexAuthorizationResult> {
   requireNativeBridge();
   return parseBeginCodexAuthorizationResult(
-    await invoke<unknown>("begin_service_authorization", { serviceId, flow }),
+    await invoke<unknown>("begin_service_authorization", {
+      serviceId,
+      flow,
+      ...(kiro ? { kiro } : {}),
+    }),
   );
 }
 

@@ -267,8 +267,12 @@ func (b *bridge) cases() []bridgeCase {
 			return s.ProbeServiceProxy(ctx, raw(`{"service_id":"service_a","proxy":{"mode":"custom","url":"socks5://127.0.0.1:1080"}}`))
 		}, method: post, path: "/control/v1/service-proxy-probes", body: `{"service_id":"service_a","proxy":{"mode":"custom","url":"socks5://127.0.0.1:1080"}}`,
 			timeout: ServiceModelProbeTimeout, limit: normal, reply: `{"ok":true}`},
+		{name: "begin_kiro_authorization", call: func(ctx context.Context) (any, error) {
+			options := raw(`{"method":"social"}`)
+			return s.BeginServiceAuthorization(ctx, "service_a", "browser", &options)
+		}, method: post, path: "/control/v1/services/service_a/authorization", body: `{"flow":"browser","kiro":{"method":"social"}}`, timeout: short, limit: normal, status: http.StatusAccepted, reply: strings.Replace(browserSessionJSON, "openai_codex", "kiro", 1)},
 		{name: "begin_service_authorization", call: func(ctx context.Context) (any, error) {
-			return s.BeginServiceAuthorization(ctx, "service_a", "browser")
+			return s.BeginServiceAuthorization(ctx, "service_a", "browser", nil)
 		}, method: post, path: "/control/v1/services/service_a/authorization", body: `{"flow":"browser"}`,
 			timeout: short, limit: normal, status: http.StatusAccepted, reply: browserSessionJSON},
 		{name: "get_service_authorization", call: func(ctx context.Context) (any, error) {
@@ -560,7 +564,7 @@ func TestForwardedCommandsCheckArgumentsBeforeCallingCore(t *testing.T) {
 			_, err := s.ProbeServiceProxy(ctx, raw(`{"service_id":7,"proxy":{"mode":"custom","url":"http://proxy:1"}}`))
 			return err
 		},
-		"begin_service_authorization": func() error { _, err := s.BeginServiceAuthorization(ctx, "service_a", "telepathy"); return err },
+		"begin_service_authorization": func() error { _, err := s.BeginServiceAuthorization(ctx, "service_a", "telepathy", nil); return err },
 		"complete code":               func() error { _, err := s.CompleteServiceAuthorization(ctx, "service_a", "auth_a", ""); return err },
 		"risk events limit":           func() error { _, err := s.ListServiceRiskEvents(ctx, "service_a", ptr(uint32(51))); return err },
 		"pricing unknown":             func() error { _, err := p.Pricing(ctx, "refund", nil, nil); return err },
@@ -644,7 +648,7 @@ func TestListServicesReadsEveryPageAndStopsOnARepeatedCursor(t *testing.T) {
 func TestBeginServiceAuthorizationOpensThePageCoreNames(t *testing.T) {
 	b := newBridge(t)
 	b.core.answer(http.StatusAccepted, "", browserSessionJSON)
-	start, err := b.services.BeginServiceAuthorization(t.Context(), "service_a", "browser")
+	start, err := b.services.BeginServiceAuthorization(t.Context(), "service_a", "browser", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -656,7 +660,7 @@ func TestBeginServiceAuthorizationOpensThePageCoreNames(t *testing.T) {
 	}
 	// A session that answers 200 is not a start.
 	b.core.answer(http.StatusOK, "", browserSessionJSON)
-	if _, err := b.services.BeginServiceAuthorization(t.Context(), "service_a", "browser"); err == nil ||
+	if _, err := b.services.BeginServiceAuthorization(t.Context(), "service_a", "browser", nil); err == nil ||
 		!strings.Contains(err.Error(), "returned 200 OK") {
 		t.Errorf("200 answer error = %v", err)
 	}
@@ -664,7 +668,7 @@ func TestBeginServiceAuthorizationOpensThePageCoreNames(t *testing.T) {
 	b.opened = nil
 	b.services.OpenURL = func(string) error { return errors.New("no browser") }
 	b.core.answer(http.StatusAccepted, "", browserSessionJSON)
-	if _, err := b.services.BeginServiceAuthorization(t.Context(), "service_a", "browser"); err != nil {
+	if _, err := b.services.BeginServiceAuthorization(t.Context(), "service_a", "browser", nil); err != nil {
 		t.Errorf("start without a browser: %v", err)
 	}
 }

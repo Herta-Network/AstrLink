@@ -83,6 +83,12 @@ func TestVerifyContract(t *testing.T) {
 		mutate    func(*Ready, *Version, *Capabilities)
 		wantError string
 	}{
+		{name: "the adapter registry", mutate: func(_ *Ready, _ *Version, c *Capabilities) {
+			c.PlanTypes = append(c.PlanTypes, contract.PlanTypeDescriptor{ID: contract.PlanTypeAdapter, UsesLocalConversion: true})
+		}},
+		{name: "an invalid adapter", mutate: func(_ *Ready, _ *Version, c *Capabilities) {
+			c.PlanTypes = append(c.PlanTypes, contract.PlanTypeDescriptor{ID: contract.PlanTypeAdapter})
+		}, wantError: "adapter"},
 		{name: "the Alpha registry", mutate: func(*Ready, *Version, *Capabilities) {}},
 		{
 			name: "a version mismatch",

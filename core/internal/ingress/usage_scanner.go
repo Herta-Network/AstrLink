@@ -31,7 +31,7 @@ type usageScanner struct {
 	encodingCaptured bool
 	// Anthropic accumulates across message_start / message_delta events.
 	anthropicInput        *int
-	anthropicOutput       int
+	anthropicOutput       *int
 	anthropicCacheRead    *int
 	anthropicCacheWrite   *int
 	anthropicCacheWrite1h *int
@@ -161,7 +161,7 @@ func (scanner *usageScanner) Usage() *contract.Usage {
 	if scanner.protocol == contract.ProtocolAnthropicMessages && scanner.anthropicSeen {
 		scanner.usage = normalizeAnthropicUsage(
 			scanner.anthropicInput,
-			&scanner.anthropicOutput,
+			scanner.anthropicOutput,
 			scanner.anthropicCacheRead,
 			scanner.anthropicCacheWrite,
 		)
@@ -503,10 +503,8 @@ func (scanner *usageScanner) applyAnthropicUsage(usage anthropicUsagePayload, ac
 		scanner.anthropicSeen = true
 	}
 	if usage.OutputTokens != nil {
-		if accumulateOutput {
-			scanner.anthropicOutput = max(scanner.anthropicOutput, *usage.OutputTokens)
-		} else {
-			scanner.anthropicOutput = *usage.OutputTokens
+		if !accumulateOutput || scanner.anthropicOutput == nil || *usage.OutputTokens >= *scanner.anthropicOutput {
+			scanner.anthropicOutput = usage.OutputTokens
 		}
 		scanner.anthropicSeen = true
 	}

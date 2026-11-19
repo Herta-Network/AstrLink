@@ -353,6 +353,11 @@ export interface DesktopToyPet {
   reply: boolean;
   /** Failover shows a bubble when a call switches route. */
   failover: boolean;
+  /**
+   * Rate shows the output tokens per second over her head while a
+   * conversation works or tokens still flow.
+   */
+  rate: boolean;
 }
 
 /**
@@ -599,7 +604,7 @@ export type PetCharacter = "auto" | "claude_code" | "codex" | "deepseek_harness"
 /** Phase is where Core is in its lifecycle. */
 export type Phase = "stopped" | "spawning" | "waiting_for_ready" | "handshaking" | "ready" | "stopping" | "exited" | "error";
 
-export type PlanType = "native" | "delegated" | "relaykit";
+export type PlanType = "native" | "delegated" | "relaykit" | "adapter";
 
 export interface PlanTypeDescriptor {
   id: PlanType;
@@ -738,7 +743,7 @@ export interface ProtocolDescriptor {
  * ProtocolID is the stable identifier persisted by AstrLink and exposed by the
  * control API. It deliberately does not reuse new-api or RelayKit identifiers.
  */
-export type ProtocolID = "openai.responses" | "openai.responses.compact" | "anthropic.messages" | "google.generate_content" | "openai.chat" | "openai.completions" | "openai.models" | "google.models" | "openai.embeddings" | "google.embeddings" | "rerank" | "openai.realtime" | "openai.images" | "openai.audio" | "openai.videos" | "openai.search";
+export type ProtocolID = "openai.responses" | "openai.responses.compact" | "anthropic.messages" | "google.generate_content" | "openai.chat" | "openai.completions" | "openai.models" | "google.models" | "openai.embeddings" | "google.embeddings" | "rerank" | "openai.realtime" | "openai.images" | "openai.audio" | "openai.videos" | "openai.search" | "kiro.generate_assistant_response" | "kiro.create_response" | "local.models";
 
 export type ProtocolPhase = "alpha" | "post_alpha";
 
@@ -1254,8 +1259,8 @@ export const Services = {
    * the browser cannot open: the page can be opened again from the app.
    * `claude auth login` opens its page itself.
    */
-  beginServiceAuthorization(serviceID: string, flow: string): Promise<AuthorizationStart> {
-    return call("Services.BeginServiceAuthorization", serviceID, flow);
+  beginServiceAuthorization(serviceID: string, flow: string, kiro: unknown | null): Promise<AuthorizationStart> {
+    return call("Services.BeginServiceAuthorization", serviceID, flow, kiro);
   },
   /** CancelServiceAuthorization ends a provider's authorization session. */
   cancelServiceAuthorization(serviceID: string): Promise<unknown> {
@@ -1326,6 +1331,13 @@ export const Services = {
    */
   getServiceUsage(serviceID: string, fresh: boolean | null): Promise<unknown> {
     return call("Services.GetServiceUsage", serviceID, fresh);
+  },
+  /**
+   * ImportKiroFile selects one file in the native host. Neither a caller-supplied
+   * path nor the tokens cross the WebView bridge. Cancel returns a null result.
+   */
+  importKiroFile(serviceID: string, create: unknown | null): Promise<ServiceRecord | null> {
+    return call("Services.ImportKiroFile", serviceID, create);
   },
   /**
    * ListServiceRiskEvents lists a subscription's recent upstream risk

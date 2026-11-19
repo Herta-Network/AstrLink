@@ -17,7 +17,7 @@ func registerCoreCommands(h *host.Host) {
 		core,
 		preferences,
 		shell,
-		control.Services{API: api, Tests: h, Owner: host.CallerLabel, OpenURL: h.OpenURL},
+		control.Services{API: api, Tests: h, Owner: host.CallerLabel, OpenURL: h.OpenURL, PickKiroFile: pickKiroFile},
 		control.Pricing{API: api},
 		control.Sync{API: api},
 		control.Records{API: api, Changed: h.RecordsChanged},
@@ -28,4 +28,12 @@ func registerCoreCommands(h *host.Host) {
 		control.Privacy{API: api, PolicyChanged: h.PrivacyPolicyChanged, ReleasesRead: h.PrivacyReleasesRead},
 		h.Raw(),
 	)
+}
+
+func pickKiroFile() (string, error) {
+	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{Filters: []mygo.FileFilter{{Name: "JSON", Extensions: []string{"json"}}}})
+	if err != nil || len(paths) == 0 {
+		return "", err
+	}
+	return paths[0], nil
 }

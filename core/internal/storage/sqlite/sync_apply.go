@@ -262,6 +262,7 @@ func rebindServiceRefs(id contract.ServiceID, document []byte, presence credenti
 	if string(service.ID) != string(id) {
 		return nil, fmt.Errorf("%w: service row id does not match document", storage.ErrInvalidRecord)
 	}
+	upgradeKiroCapabilities(&service)
 	if service.HTTP != nil {
 		connection := *service.HTTP
 		service.HTTP = &connection
@@ -404,6 +405,7 @@ func decodeSyncedService(id contract.ServiceID, document []byte) (contract.Servi
 	if err := decoder.Decode(&service); err != nil {
 		return contract.Service{}, fmt.Errorf("%w: decode synced service: %v", storage.ErrInvalidArgument, err)
 	}
+	upgradeKiroCapabilities(&service)
 	service.ID = id
 	if service.HTTP != nil {
 		connection := *service.HTTP

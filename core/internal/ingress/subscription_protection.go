@@ -19,6 +19,7 @@ type subscriptionProtection struct {
 	claudeIdentity      bool
 	codexIdentity       bool
 	grokIdentity        bool
+	kiroIdentity        bool
 	officialPassthrough bool
 }
 
@@ -31,6 +32,7 @@ func subscriptionProtectionFrom(settings contract.RoutingSettings) subscriptionP
 		claudeIdentity:      settings.ClaudeIdentityEnforcement,
 		codexIdentity:       settings.CodexIdentityEnforcement,
 		grokIdentity:        settings.GrokIdentityEnforcement,
+		kiroIdentity:        settings.KiroIdentityEnforcement,
 		officialPassthrough: settings.OfficialClientPassthrough,
 	}
 }
@@ -49,6 +51,8 @@ func (protection subscriptionProtection) sendsClientIdentity(kind contract.Servi
 		return protection.claudeIdentity && !official
 	case contract.ServiceKindGrokSubscription:
 		return protection.grokIdentity
+	case contract.ServiceKindKiroSubscription:
+		return protection.kiroIdentity
 	case contract.ServiceKindAntigravitySubscription, contract.ServiceKindCopilotSubscription, contract.ServiceKindDroidSubscription:
 		return true
 	default:
@@ -75,6 +79,9 @@ func (handler *Handler) learnClientIdentities(ctx context.Context, classified Re
 	if (protocol == contract.ProtocolOpenAIResponses || protocol == contract.ProtocolOpenAIResponsesCompact) &&
 		settings.CodexIdentityAutoLearn && accountauth.RecognizedCodexOfficialClient(header) {
 		handler.learnClientIdentity(ctx, contract.SubscriptionProviderOpenAICodex, handler.identities.LearnCodex, header)
+	}
+	if protocol == contract.ProtocolAnthropicMessages && settings.KiroIdentityAutoLearn {
+		handler.learnClientIdentity(ctx, contract.SubscriptionProviderKiro, handler.identities.LearnKiro, header)
 	}
 	// LearnGrok recognizes the Grok client from its User-Agent itself.
 	if (protocol == contract.ProtocolOpenAIResponses || protocol == contract.ProtocolOpenAIChat) && settings.GrokIdentityAutoLearn {

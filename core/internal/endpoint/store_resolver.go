@@ -482,26 +482,43 @@ func planService(candidate contract.Service, request ResolveRequest, subscriptio
 			skip = reason
 		}
 	}
-	for _, mode := range []contract.CapabilityMode{contract.CapabilityModeNative, contract.CapabilityModeDelegated} {
+	for _, mode := range []contract.CapabilityMode{contract.CapabilityModeNative, contract.CapabilityModeDelegated, contract.CapabilityModeAdapter} {
 		if !supportsRequest(candidate, request, mode) {
 			narrow(capabilitySkip(candidate, request.Protocol, request, mode))
 			continue
 		}
 		upstreamProtocol, planType := request.Protocol, contract.PlanType("")
-		if format := candidate.ModelProtocol(request.Model); format != "" && request.Protocol.IsModelFormat() {
+		modelFormat := candidate.ModelProtocol(request.Model)
+		if fixed := candidate.Kind.KiroProcessingProtocol(request.Protocol); fixed != "" {
+			upstreamProtocol = fixed
+		} else if modelFormat != "" && request.Protocol.IsModelFormat() {
 			// The model's format decides how the provider is called; enabled
 			// protocols only choose which clients may enter.
-			if mode != contract.CapabilityModeNative {
+			if mode != contract.CapabilityModeNative && mode != contract.CapabilityModeAdapter {
 				continue
 			}
-			upstreamProtocol = format
-			if format != request.Protocol {
-				if !supportsModelConversion(runtime, request.Protocol, format, request.Streaming) {
+			upstreamProtocol = modelFormat
+			if modelFormat != request.Protocol {
+				if !supportsModelConversion(runtime, request.Protocol, modelFormat, request.Streaming) {
 					narrow(contract.RoutingSkipConversionUnavailable)
 					continue
 				}
 				planType = contract.PlanTypeRelayKit
 			}
+		} else if candidate.Kind == contract.ServiceKindKiroSubscription {
+			for _, capability := range candidate.Capabilities {
+				if capability.Protocol == request.Protocol && capability.Mode == mode && capability.ConvertTo != "" {
+					upstreamProtocol = capability.ConvertTo
+					break
+				}
+			}
+		}
+		if candidate.Kind == contract.ServiceKindKiroSubscription {
+			if upstreamProtocol != request.Protocol && !supportsModelConversion(runtime, request.Protocol, upstreamProtocol, request.Streaming) {
+				narrow(contract.RoutingSkipConversionUnavailable)
+				continue
+			}
+			planType = contract.PlanTypeAdapter
 		}
 		legacy, _ := candidate.EndpointView()
 		return Resolved{
@@ -546,6 +563,9 @@ func baseURLForService(service contract.Service, subscriptionBaseURL string) str
 	}
 	if service.Kind == contract.ServiceKindCopilotSubscription {
 		return accountauth.DefaultCopilotAPIBaseURL
+	}
+	if service.Kind == contract.ServiceKindKiroSubscription {
+		return accountauth.DefaultKiroAPIBaseURL
 	}
 	if service.Kind == contract.ServiceKindDroidSubscription {
 		return accountauth.DefaultDroidAPIBaseURL

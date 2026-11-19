@@ -49,6 +49,11 @@ type Manager struct {
 	droidSessions           *accountauth.SessionManager
 	droidTokens             *accountauth.TokenSource
 	droidConfig             accountauth.OAuthConfig
+	kiroSessions            *accountauth.SessionManager
+	kiroTokens              *accountauth.TokenSource
+	kiroConfig              accountauth.OAuthConfig
+	kiroCatalog             kiroCache[map[string]kiroCatalogModel]
+	kiroFeatures            kiroCache[kiroFeatures]
 	provider                *CodexProvider
 	now                     func() time.Time
 	newID                   func() (contract.SubscriptionAccountID, error)
@@ -72,7 +77,8 @@ type usageCacheEntry struct {
 // NewManager wires one OAuth client per provider. oauth configures Codex.
 // overrides customize the other providers: an override whose Provider is set
 // applies to that provider; unlabeled overrides apply positionally to Claude
-// Code, xAI Grok, Antigravity, GitHub Copilot and then Factory Droid. Unspecified providers use their public defaults
+// Code, xAI Grok, Antigravity, GitHub Copilot, Factory Droid and Kiro.
+// Unspecified providers use their public defaults
 // while sharing oauth's HTTP client and clock.
 func NewManager(accounts AccountStore, credentials accountauth.AccountCredentialStore, oauth accountauth.OAuthConfig, overrides ...accountauth.OAuthConfig) (*Manager, error) {
 	if accounts == nil {
@@ -126,6 +132,11 @@ func NewManager(accounts AccountStore, credentials accountauth.AccountCredential
 	manager.droidSessions = accountauth.NewSessionManager(droid, credentials, manager.persistAuthorizedTokens)
 	manager.droidTokens = accountauth.NewTokenSource(credentials, accountauth.NewTokenClient(droid), droid.RefreshSkew, now)
 	manager.droidTokens.SetHooks(manager.onTokenRotated, manager.onInvalidGrant)
+	kiro := providerOverride(overrides, contract.SubscriptionProviderKiro, 5, oauth)
+	manager.kiroConfig = kiro
+	manager.kiroSessions = accountauth.NewSessionManager(kiro, credentials, manager.persistAuthorizedTokens)
+	manager.kiroTokens = accountauth.NewTokenSource(credentials, accountauth.NewTokenClient(kiro), kiro.RefreshSkew, now)
+	manager.kiroTokens.SetHooks(manager.onTokenRotated, manager.onInvalidGrant)
 	return manager, nil
 }
 
@@ -170,6 +181,8 @@ func (manager *Manager) sessionsFor(provider contract.SubscriptionProvider) *acc
 		return manager.copilotSessions
 	case contract.SubscriptionProviderFactoryDroid:
 		return manager.droidSessions
+	case contract.SubscriptionProviderKiro:
+		return manager.kiroSessions
 	default:
 		return manager.sessions
 	}
@@ -187,6 +200,8 @@ func (manager *Manager) tokensFor(provider contract.SubscriptionProvider) *accou
 		return manager.copilotTokens
 	case contract.SubscriptionProviderFactoryDroid:
 		return manager.droidTokens
+	case contract.SubscriptionProviderKiro:
+		return manager.kiroTokens
 	default:
 		return manager.tokens
 	}
@@ -195,7 +210,7 @@ func (manager *Manager) tokensFor(provider contract.SubscriptionProvider) *accou
 func (manager *Manager) allSessions() []*accountauth.SessionManager {
 	return []*accountauth.SessionManager{
 		manager.sessions, manager.claudeSessions, manager.grokSessions, manager.antigravitySessions,
-		manager.copilotSessions, manager.droidSessions,
+		manager.copilotSessions, manager.droidSessions, manager.kiroSessions,
 	}
 }
 
@@ -206,6 +221,7 @@ func (manager *Manager) invalidateTokens(id contract.ServiceID) {
 	manager.antigravityTokens.Invalidate(id)
 	manager.copilotTokens.Invalidate(id)
 	manager.droidTokens.Invalidate(id)
+	manager.kiroTokens.Invalidate(id)
 }
 
 func (manager *Manager) activateTokens(id contract.ServiceID) {
@@ -215,6 +231,7 @@ func (manager *Manager) activateTokens(id contract.ServiceID) {
 	manager.antigravityTokens.Activate(id)
 	manager.copilotTokens.Activate(id)
 	manager.droidTokens.Activate(id)
+	manager.kiroTokens.Activate(id)
 }
 
 func (manager *Manager) AuthorizationBoundary() string {
@@ -248,6 +265,7 @@ func (manager *Manager) BeginAuthorization(
 	ctx context.Context,
 	id contract.ServiceID,
 	flow contract.AuthorizationFlow,
+	kiroOptions *contract.KiroAuthorization,
 ) (contract.AuthorizationSession, error) {
 	account, err := manager.Get(ctx, id)
 	if err != nil {
@@ -274,7 +292,7 @@ func (manager *Manager) BeginAuthorization(
 		)
 		return contract.AuthorizationSession{}, err
 	}
-	session, err := sessions.Begin(ctx, id, flow)
+	session, err := sessions.Begin(ctx, id, flow, kiroOptions)
 	if err != nil {
 		manager.rollbackAuthorizationAttempt(ctx, id, attemptID, previous)
 		if errors.Is(err, accountauth.ErrCredentialStoreUnavailable) {
@@ -383,7 +401,7 @@ func (manager *Manager) Reconnect(
 	if _, err := manager.Get(ctx, id); err != nil {
 		return contract.AuthorizationSession{}, err
 	}
-	return manager.BeginAuthorization(ctx, id, flow)
+	return manager.BeginAuthorization(ctx, id, flow, nil)
 }
 
 func (manager *Manager) Logout(ctx context.Context, id contract.SubscriptionAccountID) (contract.SubscriptionAccount, error) {
@@ -558,6 +576,8 @@ func (manager *Manager) Usage(ctx context.Context, id contract.ServiceID) (contr
 		usage, err = manager.copilotUsage(ctx, tokens)
 	case contract.SubscriptionProviderFactoryDroid:
 		usage, err = manager.droidUsage(ctx, tokens)
+	case contract.SubscriptionProviderKiro:
+		usage, err = manager.kiroUsage(ctx, tokens)
 	default:
 		usage, err = manager.provider.Usage(ctx, tokens)
 	}
@@ -651,6 +671,8 @@ func usageProviderLabel(provider contract.SubscriptionProvider) string {
 		return "copilot"
 	case contract.SubscriptionProviderFactoryDroid:
 		return "droid"
+	case contract.SubscriptionProviderKiro:
+		return "kiro"
 	default:
 		return "codex"
 	}
@@ -678,6 +700,8 @@ func (manager *Manager) APIBaseURLFor(provider contract.SubscriptionProvider) st
 		return manager.copilotConfig.APIBaseURL
 	case contract.SubscriptionProviderFactoryDroid:
 		return manager.droidConfig.APIBaseURL
+	case contract.SubscriptionProviderKiro:
+		return manager.kiroConfig.APIBaseURL
 	default:
 		return manager.APIBaseURL()
 	}

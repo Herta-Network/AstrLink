@@ -27,6 +27,7 @@ const (
 	ServiceKindAntigravitySubscription ServiceKind = "antigravity_subscription"
 	ServiceKindCopilotSubscription     ServiceKind = "copilot_subscription"
 	ServiceKindDroidSubscription       ServiceKind = "droid_subscription"
+	ServiceKindKiroSubscription        ServiceKind = "kiro_subscription"
 	ServiceKindOpenCodeGo              ServiceKind = "opencode_go"
 	ServiceKindOpenCodeZen             ServiceKind = "opencode_zen"
 	ServiceKindKimiCoding              ServiceKind = "kimi_coding"
@@ -54,7 +55,7 @@ func (kind ServiceKind) Valid() bool {
 	case ServiceKindCodexSubscription, ServiceKindNewAPI, ServiceKindMagpie, ServiceKindOpenAI,
 		ServiceKindAnthropic, ServiceKindGemini, ServiceKindVertex, ServiceKindOpenAICompatible,
 		ServiceKindCustom, ServiceKindClaudeSubscription, ServiceKindGrokSubscription, ServiceKindAntigravitySubscription,
-		ServiceKindCopilotSubscription, ServiceKindDroidSubscription, ServiceKindOpenCodeGo,
+		ServiceKindCopilotSubscription, ServiceKindDroidSubscription, ServiceKindKiroSubscription, ServiceKindOpenCodeGo,
 		ServiceKindOpenCodeZen, ServiceKindKimiCoding, ServiceKindGLMCoding, ServiceKindMiniMaxCoding,
 		ServiceKindDeepSeek, ServiceKindQwen, ServiceKindMoonshot, ServiceKindGLM, ServiceKindMiniMax, ServiceKindDoubao, ServiceKindXAI:
 		return true
@@ -66,7 +67,7 @@ func (kind ServiceKind) Valid() bool {
 func (kind ServiceKind) IsSubscription() bool {
 	return kind == ServiceKindCodexSubscription || kind == ServiceKindClaudeSubscription || kind == ServiceKindGrokSubscription ||
 		kind == ServiceKindAntigravitySubscription || kind == ServiceKindCopilotSubscription ||
-		kind == ServiceKindDroidSubscription
+		kind == ServiceKindDroidSubscription || kind == ServiceKindKiroSubscription
 }
 
 func (kind ServiceKind) SubscriptionProvider() SubscriptionProvider {
@@ -81,6 +82,8 @@ func (kind ServiceKind) SubscriptionProvider() SubscriptionProvider {
 		return SubscriptionProviderGitHubCopilot
 	case ServiceKindDroidSubscription:
 		return SubscriptionProviderFactoryDroid
+	case ServiceKindKiroSubscription:
+		return SubscriptionProviderKiro
 	case ServiceKindCodexSubscription:
 		return SubscriptionProviderOpenAICodex
 	default:
@@ -238,29 +241,39 @@ type Service struct {
 	UpdatedAt      time.Time               `json:"updated_at,omitempty"`
 }
 
-// copilotClaudeRedirects maps the model ids Claude Code sends to the dotted
-// ids GitHub Copilot lists, newest first. Ids without a dot (claude-opus-5)
-// need no rule. Keep it in step with serviceBuiltinRedirects in
-// apps/desktop/src/service-model.ts.
-var copilotClaudeRedirects = []ModelRedirect{
-	{From: "claude-fable-5-2", To: "claude-fable-5.2", Enabled: true},
-	{From: "claude-fable-5-1", To: "claude-fable-5.1", Enabled: true},
+// Claude Code uses hyphenated version IDs for these models; Kiro and
+// GitHub Copilot use dotted versions. Mirror these lists in service-model.ts.
+var claude55Redirects = []ModelRedirect{
 	{From: "claude-opus-5-5", To: "claude-opus-5.5", Enabled: true},
 	{From: "claude-sonnet-5-5", To: "claude-sonnet-5.5", Enabled: true},
 	{From: "claude-haiku-5-5", To: "claude-haiku-5.5", Enabled: true},
-	{From: "claude-opus-4-8", To: "claude-opus-4.8", Enabled: true},
-	{From: "claude-opus-4-6", To: "claude-opus-4.6", Enabled: true},
-	{From: "claude-sonnet-4-6", To: "claude-sonnet-4.6", Enabled: true},
-	{From: "claude-opus-4-5", To: "claude-opus-4.5", Enabled: true},
-	{From: "claude-sonnet-4-5", To: "claude-sonnet-4.5", Enabled: true},
-	{From: "claude-haiku-4-5", To: "claude-haiku-4.5", Enabled: true},
-	{From: "claude-opus-4-1", To: "claude-opus-4.1", Enabled: true},
 }
+
+// Keep the Copilot defaults in descending release order in the editor.
+var copilotClaudeRedirects = slices.Concat(
+	[]ModelRedirect{
+		{From: "claude-fable-5-2", To: "claude-fable-5.2", Enabled: true},
+		{From: "claude-fable-5-1", To: "claude-fable-5.1", Enabled: true},
+	},
+	claude55Redirects,
+	[]ModelRedirect{
+		{From: "claude-opus-4-8", To: "claude-opus-4.8", Enabled: true},
+		{From: "claude-opus-4-6", To: "claude-opus-4.6", Enabled: true},
+		{From: "claude-sonnet-4-6", To: "claude-sonnet-4.6", Enabled: true},
+		{From: "claude-opus-4-5", To: "claude-opus-4.5", Enabled: true},
+		{From: "claude-sonnet-4-5", To: "claude-sonnet-4.5", Enabled: true},
+		{From: "claude-haiku-4-5", To: "claude-haiku-4.5", Enabled: true},
+		{From: "claude-opus-4-1", To: "claude-opus-4.1", Enabled: true},
+	},
+)
 
 // BuiltinModelRedirects are the rules a kind applies until a service stores
 // its own rule for the same source model.
 func (kind ServiceKind) BuiltinModelRedirects() []ModelRedirect {
-	if kind == ServiceKindCopilotSubscription {
+	switch kind {
+	case ServiceKindKiroSubscription:
+		return slices.Clone(claude55Redirects)
+	case ServiceKindCopilotSubscription:
 		return slices.Clone(copilotClaudeRedirects)
 	}
 	return nil
@@ -314,9 +327,9 @@ func (service Service) ModelProtocol(model string) ProtocolID {
 }
 
 // ResponsesWebSocket reports the effective per-channel transport setting.
-// Copilot, Droid and Vertex do not expose native Responses WebSockets.
+// Copilot, Droid, Kiro and Vertex do not expose native Responses WebSockets.
 func (service Service) ResponsesWebSocket() bool {
-	if service.Kind == ServiceKindCopilotSubscription || service.Kind == ServiceKindDroidSubscription || service.Kind == ServiceKindVertex {
+	if service.Kind == ServiceKindCopilotSubscription || service.Kind == ServiceKindDroidSubscription || service.Kind == ServiceKindKiroSubscription || service.Kind == ServiceKindVertex {
 		return false
 	}
 	if service.ResponsesWebSocketEnabled != nil {
@@ -398,6 +411,9 @@ func (service Service) Validate() error {
 	}
 	seen := make(map[string]struct{}, len(service.Capabilities))
 	for index, capability := range service.Capabilities {
+		if capability.Mode == CapabilityModeAdapter && service.Kind != ServiceKindKiroSubscription {
+			return fmt.Errorf("provider adapter mode is not supported for %s", service.Kind)
+		}
 		if service.Kind == ServiceKindVertex {
 			if service.VertexExpress() && capability.Protocol.IsModelFormat() {
 				upstream := capability.Protocol

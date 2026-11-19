@@ -1,3 +1,6 @@
+import { serviceBuiltinRedirects, type ServiceKind } from "./service-model";
+import type { ModelRedirect } from "./failure-policy-model";
+
 /**
  * A client id from the host's catalog, such as `claude` or `workbuddy`. The
  * host lists which clients exist; the UI keys icons and copy by id.
@@ -967,9 +970,34 @@ export function parseClientProxyCheck(value: unknown): ClientProxyCheck {
 
 /** The part of a service the model catalog needs. */
 export interface CatalogService {
+  kind?: ServiceKind;
+  model_redirects?: readonly ModelRedirect[];
   enabled: boolean;
   models: readonly string[];
   subscription?: { status: string } | null;
+}
+
+/** Kiro's public aliases precede the provider IDs so Claude setup picks the
+ * client spelling when both denote the same model version. */
+export function clientModelIDs(service: CatalogService): readonly string[] {
+  if (service.kind !== "kiro_subscription") return service.models;
+  const targets = new Set(service.models);
+  const aliases = new Map(
+    serviceBuiltinRedirects(service.kind).map((rule) => [
+      rule.from,
+      rule.defaultTo,
+    ]),
+  );
+  for (const rule of service.model_redirects ?? []) {
+    if (rule.enabled) aliases.set(rule.from, rule.to);
+    else aliases.delete(rule.from);
+  }
+  const ids = new Set<string>();
+  for (const [from, to] of aliases) {
+    if (targets.has(to)) ids.add(from);
+  }
+  for (const target of targets) ids.add(target);
+  return [...ids];
 }
 
 /** A service that can take requests: enabled and, for a subscription, connected. */
@@ -989,7 +1017,7 @@ export function availableModels(
   redirects: readonly { from: string; to: string; enabled: boolean }[],
 ): Set<string> {
   const served = new Set(
-    services.filter(serviceUsable).flatMap((service) => service.models),
+    services.filter(serviceUsable).flatMap(clientModelIDs),
   );
   const available = new Set(served);
   for (const redirect of redirects) {
@@ -1018,10 +1046,16 @@ export function configModels(models: CurrentModels): string[] {
  * local catalog only; nothing is asked upstream.
  */
 export function missingModels(
-  status: Pick<ClientConfigStatus, "models">,
+  status: Pick<ClientConfigStatus, "client" | "models">,
   available: ReadonlySet<string>,
 ): string[] {
-  return configModels(status.models).filter((model) => !available.has(model));
+  // Claude Code strips its context-window suffix before sending the model.
+  return configModels(status.models).filter(
+    (model) =>
+      !available.has(
+        status.client === "claude" ? model.replace(/\[1m\]$/i, "") : model,
+      ),
+  );
 }
 
 /** Why a config this token holds needs the user, most pressing first. */

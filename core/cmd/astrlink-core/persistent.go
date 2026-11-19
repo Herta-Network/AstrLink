@@ -257,6 +257,7 @@ func openPersistentCore(ctx context.Context, options persistentOptions) (*persis
 	resolver.WithUsageCache(subscriptionManager)
 	vertexTokens := vertexauth.New(nil)
 	gatewayDependencies := ingress.Dependencies{
+		ResolveKiro:      subscriptionManager.KiroRuntime,
 		ProxyCredentials: store,
 		Resolver:         resolver,
 		Authorizer: endpoint.NewServiceAuthorizer(store, subscriptionManager, subscriptionManager.Provider().IdentityPolicy()).

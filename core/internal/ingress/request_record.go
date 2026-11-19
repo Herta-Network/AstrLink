@@ -22,6 +22,7 @@ import (
 	"github.com/QuantumNous/astrlink/core/contract"
 	"github.com/QuantumNous/astrlink/core/internal/endpoint"
 	"github.com/QuantumNous/astrlink/core/internal/privacy"
+	"github.com/QuantumNous/astrlink/core/internal/providerapi"
 	"github.com/QuantumNous/astrlink/core/internal/relaykitbridge"
 	"github.com/QuantumNous/astrlink/core/internal/storage"
 )
@@ -201,6 +202,7 @@ type recordSession struct {
 	accessTokenID       *contract.AccessTokenID
 	scanner             *usageScanner
 	upstreamScanner     *usageScanner
+	kiroExchange        *providerapi.KiroExchange
 	// outputFlushedAt is when the stream last stored its output; only the
 	// goroutine reading the upstream body touches it.
 	outputFlushedAt       time.Time
@@ -624,7 +626,7 @@ func (session *recordSession) recordSnapshot(
 		record.PrivacyDecision = &decision
 	}
 	record.Output = session.upstreamScanner.outputActivity()
-	if session.upstreamScanner != nil && !session.upstreamScanner.firstOutputAt.IsZero() {
+	if record.Streaming && session.upstreamScanner != nil && !session.upstreamScanner.firstOutputAt.IsZero() {
 		firstTokenMs := int(max(0, session.upstreamScanner.firstOutputAt.Sub(session.startedAt).Milliseconds()))
 		record.FirstTokenMs = &firstTokenMs
 		if !session.upstreamScanner.firstAnswerAt.IsZero() {
@@ -682,6 +684,13 @@ func (session *recordSession) recordSnapshot(
 func (session *recordSession) attemptUsage() *contract.Usage {
 	if session == nil {
 		return nil
+	}
+	if session.kiroExchange != nil {
+		usage := session.kiroExchange.ObservedUsage()
+		if usage != nil {
+			usage.ThinkingEnabled = session.classified.ThinkingEnabled
+		}
+		return usage
 	}
 	if session.upstreamScanner != nil {
 		if usage := session.upstreamScanner.Usage(); usage != nil {
@@ -979,7 +988,8 @@ func (session *recordSession) beginNetworkAttempt(
 	session.attemptIndex++
 	session.startedAt = time.Now().UTC()
 	session.networkAttemptOpen = true
-	session.upstreamScanner = newUsageScanner(plan.UpstreamProtocol, session.classified.Streaming)
+	session.kiroExchange = nil
+	session.upstreamScanner = newUsageScanner(plan.ProcessingProtocol(), session.classified.Streaming)
 	session.noteSelected(candidate, plan)
 	session.addImageCompressionEvent(images)
 	session.attemptImages = images
@@ -1020,12 +1030,18 @@ func (session *recordSession) noteConversionDiagnostics(
 			Path:     conversionDiagnosticText(diagnostic.Path, contract.MaxConversionDiagnosticPathRunes),
 			Message:  conversionDiagnosticText(diagnostic.Message, contract.MaxConversionDiagnosticDetailRunes),
 		}
-		if entry.Code == "" {
-			entry.Code = "unspecified"
-		}
-		if slices.Contains(session.conversionDiagnostics, entry) {
-			continue
-		}
+		session.noteDiagnostic(entry)
+	}
+}
+
+func (session *recordSession) noteDiagnostic(entry contract.ConversionDiagnostic) {
+	if session == nil || len(session.conversionDiagnostics) >= contract.MaxConversionDiagnostics {
+		return
+	}
+	if entry.Code == "" {
+		entry.Code = "unspecified"
+	}
+	if !slices.Contains(session.conversionDiagnostics, entry) {
 		session.conversionDiagnostics = append(session.conversionDiagnostics, entry)
 	}
 }
@@ -1456,6 +1472,7 @@ func (session *recordSession) resetAttemptLocal() {
 	// Keep the scanner pointer held by the client writer valid across retries.
 	session.scanner.reset(session.classified.Protocol, session.classified.Streaming)
 	session.upstreamScanner = nil
+	session.kiroExchange = nil
 	session.status = contract.RequestStatusPending
 	session.httpStatus = 0
 	session.recovery = nil

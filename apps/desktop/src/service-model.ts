@@ -57,7 +57,7 @@ export interface ServiceAuth {
 
 export interface ServiceCapability {
   protocol: string;
-  mode: "native" | "delegated";
+  mode: "native" | "delegated" | "adapter";
   streaming: boolean;
   convert_to?: string;
 }
@@ -134,7 +134,8 @@ export type SubscriptionServiceKind =
   | "grok_subscription"
   | "antigravity_subscription"
   | "copilot_subscription"
-  | "droid_subscription";
+  | "droid_subscription"
+  | "kiro_subscription";
 export type ServiceKind = SubscriptionServiceKind | HTTPServiceKind;
 
 /** Provider owning each subscription kind; mirrors contract.ServiceKind.SubscriptionProvider. */
@@ -148,10 +149,11 @@ export const subscriptionKindProviders: Record<
   antigravity_subscription: "antigravity",
   copilot_subscription: "github_copilot",
   droid_subscription: "factory_droid",
+  kiro_subscription: "kiro",
 };
 
-/** Fixed native capabilities; mirrors contract.SubscriptionProvider.Capabilities. */
-export const subscriptionNativeCapabilities: Record<
+/** Fixed client-facing entries, including provider adapters; mirrors Core. */
+export const subscriptionBaseCapabilities: Record<
   SubscriptionServiceKind,
   readonly ServiceCapability[]
 > = {
@@ -180,6 +182,11 @@ export const subscriptionNativeCapabilities: Record<
     { protocol: "openai.chat", mode: "native", streaming: true },
     { protocol: "openai.models", mode: "native", streaming: false },
   ],
+  kiro_subscription: [
+    { protocol: "anthropic.messages", mode: "adapter", streaming: true },
+    { protocol: "openai.responses", mode: "adapter", streaming: true },
+    { protocol: "openai.models", mode: "adapter", streaming: false },
+  ],
   droid_subscription: [
     { protocol: "anthropic.messages", mode: "native", streaming: true },
     { protocol: "openai.responses", mode: "native", streaming: true },
@@ -206,6 +213,7 @@ export const subscriptionConversionTargets: Record<
     "openai.chat",
   ],
   droid_subscription: ["anthropic.messages", "openai.responses", "openai.chat"],
+  kiro_subscription: ["anthropic.messages"],
 };
 
 export const subscriptionKinds = Object.keys(
@@ -625,7 +633,11 @@ function parseCapability(value: unknown, path: string): ServiceCapability {
   const protocol = stringAt(capability.protocol, `${path}.protocol`, 3, 96);
   if (!protocolIDPattern.test(protocol))
     invalid(`${path}.protocol`, "invalid protocol ID");
-  if (capability.mode !== "native" && capability.mode !== "delegated") {
+  if (
+    capability.mode !== "native" &&
+    capability.mode !== "delegated" &&
+    capability.mode !== "adapter"
+  ) {
     invalid(`${path}.mode`, "unknown capability mode");
   }
   if (typeof capability.streaming !== "boolean") {
@@ -984,7 +996,8 @@ function parseSubscriptionConnection(
     subscription.provider !== "xai_grok" &&
     subscription.provider !== "antigravity" &&
     subscription.provider !== "github_copilot" &&
-    subscription.provider !== "factory_droid"
+    subscription.provider !== "factory_droid" &&
+    subscription.provider !== "kiro"
   ) {
     invalid(`${path}.provider`, "unknown subscription provider");
   }
@@ -1141,6 +1154,11 @@ export function parseService(value: unknown, path = "$"): Service {
   const capabilities = service.capabilities.map((capability, index) =>
     parseCapability(capability, `${path}.capabilities[${index}]`),
   );
+  if (
+    service.kind !== "kiro_subscription" &&
+    capabilities.some((capability) => capability.mode === "adapter")
+  )
+    invalid(`${path}.capabilities`, "unsupported provider adapter");
   if (service.kind === "vertex") {
     const auth = parseHTTPConnection(service.http, `${path}.http`).auth.scheme;
     const formats: readonly string[] = serviceModelFormats("vertex", auth);
@@ -1381,10 +1399,11 @@ export function subscriptionRiskLabel(
 export function supportsResponsesWebSocket(
   service: Pick<Service, "kind" | "capabilities">,
 ): boolean {
-  // Copilot, Droid and Vertex do not expose native Responses WebSockets.
+  // Copilot, Droid, Kiro and Vertex do not expose native Responses WebSockets.
   if (
     service.kind === "copilot_subscription" ||
     service.kind === "droid_subscription" ||
+    service.kind === "kiro_subscription" ||
     service.kind === "vertex"
   )
     return false;
@@ -1399,29 +1418,38 @@ export function supportsResponsesWebSocket(
   );
 }
 
-/**
- * Model ids Claude Code sends, mapped to the dotted ids GitHub Copilot lists,
- * newest first. Mirrors contract.ServiceKind.BuiltinModelRedirects.
- */
+// Mirrors contract.ServiceKind.BuiltinModelRedirects.
+function enabledRedirect(
+  from: string,
+  defaultTo: string,
+): BuiltinModelRedirect {
+  return { from, defaultTo, defaultEnabled: true };
+}
+
+const claude55Redirects: readonly BuiltinModelRedirect[] = [
+  enabledRedirect("claude-opus-5-5", "claude-opus-5.5"),
+  enabledRedirect("claude-sonnet-5-5", "claude-sonnet-5.5"),
+  enabledRedirect("claude-haiku-5-5", "claude-haiku-5.5"),
+];
+
 const copilotClaudeRedirects: readonly BuiltinModelRedirect[] = [
-  ["claude-fable-5-2", "claude-fable-5.2"],
-  ["claude-fable-5-1", "claude-fable-5.1"],
-  ["claude-opus-5-5", "claude-opus-5.5"],
-  ["claude-sonnet-5-5", "claude-sonnet-5.5"],
-  ["claude-haiku-5-5", "claude-haiku-5.5"],
-  ["claude-opus-4-8", "claude-opus-4.8"],
-  ["claude-opus-4-6", "claude-opus-4.6"],
-  ["claude-sonnet-4-6", "claude-sonnet-4.6"],
-  ["claude-opus-4-5", "claude-opus-4.5"],
-  ["claude-sonnet-4-5", "claude-sonnet-4.5"],
-  ["claude-haiku-4-5", "claude-haiku-4.5"],
-  ["claude-opus-4-1", "claude-opus-4.1"],
-].map(([from, defaultTo]) => ({ from, defaultTo, defaultEnabled: true }));
+  enabledRedirect("claude-fable-5-2", "claude-fable-5.2"),
+  enabledRedirect("claude-fable-5-1", "claude-fable-5.1"),
+  ...claude55Redirects,
+  enabledRedirect("claude-opus-4-8", "claude-opus-4.8"),
+  enabledRedirect("claude-opus-4-6", "claude-opus-4.6"),
+  enabledRedirect("claude-sonnet-4-6", "claude-sonnet-4.6"),
+  enabledRedirect("claude-opus-4-5", "claude-opus-4.5"),
+  enabledRedirect("claude-sonnet-4-5", "claude-sonnet-4.5"),
+  enabledRedirect("claude-haiku-4-5", "claude-haiku-4.5"),
+  enabledRedirect("claude-opus-4-1", "claude-opus-4.1"),
+];
 
 /** Built-in redirect rows a provider of this kind applies until changed. */
 export function serviceBuiltinRedirects(
   kind: ServiceKind,
 ): readonly BuiltinModelRedirect[] {
+  if (kind === "kiro_subscription") return claude55Redirects;
   return kind === "copilot_subscription" ? copilotClaudeRedirects : [];
 }
 

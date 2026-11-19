@@ -8,11 +8,12 @@ const (
 	PlanTypeNative    PlanType = "native"
 	PlanTypeDelegated PlanType = "delegated"
 	PlanTypeRelayKit  PlanType = "relaykit"
+	PlanTypeAdapter   PlanType = "adapter"
 )
 
 func (planType PlanType) Valid() bool {
 	switch planType {
-	case PlanTypeNative, PlanTypeDelegated, PlanTypeRelayKit:
+	case PlanTypeNative, PlanTypeDelegated, PlanTypeRelayKit, PlanTypeAdapter:
 		return true
 	default:
 		return false
@@ -24,7 +25,7 @@ func (planType PlanType) AvailableInAlpha() bool {
 }
 
 func (planType PlanType) UsesLocalConversion() bool {
-	return planType == PlanTypeRelayKit
+	return planType == PlanTypeRelayKit || planType == PlanTypeAdapter
 }
 
 type ConversionQuality string
@@ -76,29 +77,32 @@ func (edge ConversionEdge) Validate() error {
 
 // ExecutionPlan records the externally meaningful route decision. Native and
 // delegated plans preserve the ingress protocol at the AstrLink boundary.
-// Only relaykit plans may contain a local conversion path.
+// Provider adapter plans explicitly name their intermediate format and actual
+// provider wire. Their optional conversion path runs before that adapter.
 type ExecutionPlan struct {
-	Type              PlanType          `json:"plan_type"`
-	ServiceID         ServiceID         `json:"service_id"`
-	InputProtocol     ProtocolID        `json:"input_protocol"`
-	UpstreamProtocol  ProtocolID        `json:"upstream_protocol"`
-	ConversionPath    []ConversionEdge  `json:"conversion_path"`
-	ConversionQuality ConversionQuality `json:"conversion_quality,omitempty"`
-	Streaming         bool              `json:"streaming"`
+	Type                 PlanType          `json:"plan_type"`
+	ServiceID            ServiceID         `json:"service_id"`
+	InputProtocol        ProtocolID        `json:"input_protocol"`
+	UpstreamProtocol     ProtocolID        `json:"upstream_protocol"`
+	AdapterInputProtocol ProtocolID        `json:"adapter_input_protocol,omitempty"`
+	ConversionPath       []ConversionEdge  `json:"conversion_path"`
+	ConversionQuality    ConversionQuality `json:"conversion_quality,omitempty"`
+	Streaming            bool              `json:"streaming"`
 }
 
 // UnmarshalJSON accepts endpoint_id in historical request records while
 // preserving service_id as the only current wire representation.
 func (plan *ExecutionPlan) UnmarshalJSON(data []byte) error {
 	var wire struct {
-		Type              PlanType          `json:"plan_type"`
-		ServiceID         *ServiceID        `json:"service_id"`
-		EndpointID        *ServiceID        `json:"endpoint_id"`
-		InputProtocol     ProtocolID        `json:"input_protocol"`
-		UpstreamProtocol  ProtocolID        `json:"upstream_protocol"`
-		ConversionPath    []ConversionEdge  `json:"conversion_path"`
-		ConversionQuality ConversionQuality `json:"conversion_quality,omitempty"`
-		Streaming         bool              `json:"streaming"`
+		Type                 PlanType          `json:"plan_type"`
+		ServiceID            *ServiceID        `json:"service_id"`
+		EndpointID           *ServiceID        `json:"endpoint_id"`
+		InputProtocol        ProtocolID        `json:"input_protocol"`
+		UpstreamProtocol     ProtocolID        `json:"upstream_protocol"`
+		AdapterInputProtocol ProtocolID        `json:"adapter_input_protocol,omitempty"`
+		ConversionPath       []ConversionEdge  `json:"conversion_path"`
+		ConversionQuality    ConversionQuality `json:"conversion_quality,omitempty"`
+		Streaming            bool              `json:"streaming"`
 	}
 	if err := decodeStrictContractJSON(data, &wire); err != nil {
 		return err
@@ -113,13 +117,14 @@ func (plan *ExecutionPlan) UnmarshalJSON(data []byte) error {
 		serviceID = *wire.EndpointID
 	}
 	*plan = ExecutionPlan{
-		Type:              wire.Type,
-		ServiceID:         serviceID,
-		InputProtocol:     wire.InputProtocol,
-		UpstreamProtocol:  wire.UpstreamProtocol,
-		ConversionPath:    wire.ConversionPath,
-		ConversionQuality: wire.ConversionQuality,
-		Streaming:         wire.Streaming,
+		Type:                 wire.Type,
+		ServiceID:            serviceID,
+		InputProtocol:        wire.InputProtocol,
+		UpstreamProtocol:     wire.UpstreamProtocol,
+		AdapterInputProtocol: wire.AdapterInputProtocol,
+		ConversionPath:       wire.ConversionPath,
+		ConversionQuality:    wire.ConversionQuality,
+		Streaming:            wire.Streaming,
 	}
 	return nil
 }
@@ -141,7 +146,12 @@ func (plan ExecutionPlan) Validate() error {
 		return fmt.Errorf("conversion_path must be a non-null array")
 	}
 
+	if plan.Type != PlanTypeAdapter && plan.AdapterInputProtocol != "" {
+		return fmt.Errorf("adapter input is only valid for provider adapter plans")
+	}
 	switch plan.Type {
+	case PlanTypeAdapter:
+		return plan.validateAdapter()
 	case PlanTypeNative, PlanTypeDelegated:
 		if plan.InputProtocol != plan.UpstreamProtocol {
 			return fmt.Errorf("%s plan must preserve the ingress protocol", plan.Type)
@@ -196,16 +206,16 @@ func (plan ExecutionPlan) ValidateForRuntime(profile RuntimeProfile) error {
 	if err := plan.Validate(); err != nil {
 		return err
 	}
-	if plan.Type == PlanTypeRelayKit && !profile.RelayKitAvailable {
+	if plan.UsesRelayKit() && !profile.RelayKitAvailable {
 		return fmt.Errorf("plan type %q is not available in this runtime", plan.Type)
 	}
 	if !plan.InputProtocol.AvailableInAlpha() {
 		return fmt.Errorf("input protocol %q is not available in Alpha", plan.InputProtocol)
 	}
-	if !plan.UpstreamProtocol.AvailableInAlpha() {
-		return fmt.Errorf("upstream protocol %q is not available in Alpha", plan.UpstreamProtocol)
+	if !plan.ProcessingProtocol().AvailableInAlpha() {
+		return fmt.Errorf("processing protocol %q is unavailable", plan.ProcessingProtocol())
 	}
-	if len(profile.Edges) == 0 || plan.Type != PlanTypeRelayKit {
+	if len(profile.Edges) == 0 || !plan.UsesRelayKit() {
 		return nil
 	}
 	for index, edge := range plan.ConversionPath {

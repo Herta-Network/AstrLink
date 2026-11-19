@@ -200,3 +200,49 @@ func BenchmarkServiceDocumentDecode(b *testing.B) {
 		})
 	}
 }
+
+func TestReadSavedKiroServiceUpgradesResponsesRoute(t *testing.T) {
+	for _, converted := range []bool{false, true} {
+		service := contract.Service{ID: "service_kiro", Name: "Kiro", Kind: contract.ServiceKindKiroSubscription, Models: []string{"example"}, Capabilities: []contract.Capability{{Protocol: contract.ProtocolAnthropicMessages, Mode: contract.CapabilityModeAdapter, Streaming: true}, {Protocol: contract.ProtocolOpenAIModels, Mode: contract.CapabilityModeAdapter}}, Subscription: &contract.SubscriptionConnection{Provider: contract.SubscriptionProviderKiro, Status: contract.SubscriptionStatusDisconnected}}
+		if converted {
+			service.Capabilities = append(service.Capabilities, contract.Capability{Protocol: contract.ProtocolOpenAIChat, Mode: contract.CapabilityModeAdapter, ConvertTo: contract.ProtocolAnthropicMessages})
+			service.Capabilities = append(service.Capabilities, contract.Capability{Protocol: contract.ProtocolOpenAIResponses, Mode: contract.CapabilityModeAdapter, Streaming: true, ConvertTo: contract.ProtocolAnthropicMessages})
+		}
+		raw, err := json.Marshal(service)
+		if err != nil {
+			t.Fatal(err)
+		}
+		record, err := decodeServiceRecord(string(service.ID), raw)
+		if err != nil || record.ETag != entityTag(raw) {
+			t.Fatalf("read old service: %v", err)
+		}
+		synced, err := decodeSyncedService(service.ID, raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, s := range []contract.Service{record.Service, synced} {
+			found := 0
+			chat := false
+			for _, c := range s.Capabilities {
+				if c.Protocol == contract.ProtocolOpenAIChat {
+					chat = true
+					if c.ConvertTo != contract.ProtocolOpenAIResponses || c.Streaming {
+						t.Fatal(c)
+					}
+				}
+				if c.Protocol == contract.ProtocolOpenAIResponses {
+					found++
+					if c.ConvertTo != "" || c.Mode != contract.CapabilityModeAdapter || !c.Streaming {
+						t.Fatal(c)
+					}
+				}
+			}
+			if chat != converted {
+				t.Fatal("Chat enablement changed")
+			}
+			if found != 1 {
+				t.Fatal("expected one direct Responses entry")
+			}
+		}
+	}
+}

@@ -80,6 +80,7 @@ func present(raw json.RawMessage) bool {
 // tests, probes and authorization.
 type Services struct {
 	*API
+	PickKiroFile func() (string, error)
 	// Tests registers connection tests so the window that started one can
 	// cancel it.
 	Tests TestRegistry
@@ -472,7 +473,7 @@ type AuthorizationStart struct {
 // opens the page Core names in the browser. The session still starts when
 // the browser cannot open: the page can be opened again from the app.
 // `claude auth login` opens its page itself.
-func (s Services) BeginServiceAuthorization(ctx context.Context, serviceID, flow string) (AuthorizationStart, error) {
+func (s Services) BeginServiceAuthorization(ctx context.Context, serviceID, flow string, kiro *json.RawMessage) (AuthorizationStart, error) {
 	path, err := servicePath(serviceID, "/authorization")
 	if err != nil {
 		return AuthorizationStart{}, err
@@ -481,8 +482,9 @@ func (s Services) BeginServiceAuthorization(ctx context.Context, serviceID, flow
 		return AuthorizationStart{}, err
 	}
 	body := struct {
-		Flow string `json:"flow"`
-	}{flow}
+		Flow string           `json:"flow"`
+		Kiro *json.RawMessage `json:"kiro,omitempty"`
+	}{flow, kiro}
 	response, err := s.Caller.Call(ctx, Request{Method: http.MethodPost, Path: path, Body: body})
 	if err != nil {
 		return AuthorizationStart{}, err

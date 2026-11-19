@@ -757,6 +757,15 @@ describe("missing models", () => {
     ]);
   });
 
+  it("checks Claude's 1M option against the on-wire model ID", () => {
+    const models = { opusModel: "claude-opus-5-5[1M]" };
+    const catalog = new Set(["claude-opus-5-5"]);
+    expect(missingModels({ client: "claude", models }, catalog)).toEqual([]);
+    expect(missingModels({ client: "other", models }, catalog)).toEqual([
+      models.opusModel,
+    ]);
+  });
+
   it("names a config's models the gateway no longer serves", () => {
     const available = availableModels(services, redirects);
     const config = parseStatuses(

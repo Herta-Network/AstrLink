@@ -4,6 +4,7 @@
 package transport
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -21,10 +22,24 @@ import (
 const copyBufferSize = 32 * 1024
 const localPolicyWarningHeader = "X-AstrLink-Policy-Warning"
 
+// KiroRuntimeResolver resolves model features for the credential already bound to this attempt.
+type KiroRuntimeResolver func(context.Context, http.Header, string, contract.ProtocolID) (providerapi.KiroRuntime, error)
+
+// KiroAttempt belongs to a single selected candidate. Preparation fills the
+// exchange before ObserveOutbound records the resulting wire request.
+type KiroAttempt struct {
+	ChatCompletions bool
+	Resolve         KiroRuntimeResolver
+	Model           string
+	Caller          contract.AccessTokenID
+	Exchange        *providerapi.KiroExchange
+}
+
 // Target contains the already-resolved upstream URL and safe request headers.
 // RequestHeaders may include authentication material prepared by a higher
 // layer. Forwarder does not log or otherwise retain those values.
 type Target struct {
+	Kiro             *KiroAttempt
 	Service          contract.Service
 	ProxyCredentials secretstore.SecretStore
 	// HandleResponse owns the body when set, and decides before any client bytes.
@@ -98,6 +113,7 @@ func (err *ResponseError) Unwrap() error {
 
 // Forwarder performs one protocol-preserving upstream round trip.
 type Forwarder struct {
+	kiroReplay     providerapi.KiroReplay
 	roundTripper   http.RoundTripper
 	proxyTransport http.RoundTripper
 }
@@ -150,6 +166,40 @@ func (forwarder *Forwarder) RoundTrip(request *http.Request, target Target) (*ht
 		if err := providerapi.VertexRequest(outbound, target.Service.HTTP); err != nil {
 			return nil, &TargetError{err: err}
 		}
+	}
+	var kiroExchange *providerapi.KiroExchange
+	if target.Service.Kind == contract.ServiceKindKiroSubscription {
+		var runtime providerapi.KiroRuntime
+		attempt := target.Kiro
+		if attempt == nil {
+			attempt = &KiroAttempt{}
+		}
+		if attempt.Resolve != nil {
+			protocol := contract.ProtocolAnthropicMessages
+			if strings.HasSuffix(outbound.URL.Path, "/responses") {
+				protocol = contract.ProtocolOpenAIResponses
+			}
+			runtime, err = attempt.Resolve(ctx, target.RequestHeaders, attempt.Model, protocol)
+			if err != nil {
+				return nil, &UpstreamError{err: err}
+			}
+		}
+		profile := target.RequestHeaders.Get(providerapi.KiroProfileHeader)
+		if runtime.Profile != "" {
+			profile = runtime.Profile
+		}
+		grant := target.RequestHeaders.Get(providerapi.KiroGrantHeader)
+		if grant == "" {
+			// Without a trusted grant identity, keep replay isolated to this token.
+			grant = target.RequestHeaders.Get("Authorization")
+		}
+		runtime.BindReplay(&forwarder.kiroReplay, string(target.Service.ID), profile, grant, string(attempt.Caller))
+		runtime.ChatCompletions = attempt.ChatCompletions
+		kiroExchange, err = providerapi.KiroRequest(outbound, profile, target.RequestHeaders.Get(providerapi.KiroSessionHeader), runtime)
+		if err != nil {
+			return nil, &TargetError{err: err}
+		}
+		attempt.Exchange = kiroExchange
 	}
 	antigravityMode := ""
 	if target.Service.Kind == contract.ServiceKindAntigravitySubscription {
@@ -212,6 +262,12 @@ func (forwarder *Forwarder) RoundTrip(request *http.Request, target Target) (*ht
 	response.Body = body
 	if antigravityMode != "" {
 		if err := providerapi.AntigravityResponse(response, antigravityMode); err != nil {
+			_ = response.Body.Close()
+			return nil, &UpstreamError{err: err}
+		}
+	}
+	if kiroExchange != nil {
+		if err := providerapi.KiroResponse(response, kiroExchange); err != nil {
 			_ = response.Body.Close()
 			return nil, &UpstreamError{err: err}
 		}

@@ -240,20 +240,7 @@ func (store *Store) subscriptionCredential(ctx context.Context, ref secretstore.
 	}
 	switch operation {
 	case "put":
-		if len(secret) == 0 || len(secret) > maxSubscriptionCredentialLen {
-			return nil, fmt.Errorf("%w: subscription credential must contain 1 to %d bytes", storagecontract.ErrInvalidArgument, maxSubscriptionCredentialLen)
-		}
-		sealed, err := store.keys.sealColumn(subscriptionCredentialsTable, string(id), secret)
-		if err != nil {
-			return nil, fmt.Errorf("seal subscription credential: %w", err)
-		}
-		if _, err := store.db.ExecContext(ctx, `INSERT INTO subscription_credentials (service_id, credential_value, updated_at)
-VALUES (?, ?, ?)
-ON CONFLICT(service_id) DO UPDATE SET credential_value = excluded.credential_value, updated_at = excluded.updated_at`,
-			id, sealed, store.now().UTC().Format(time.RFC3339Nano)); err != nil {
-			return nil, fmt.Errorf("write subscription credential: %w", err)
-		}
-		return nil, nil
+		return nil, store.putSubscriptionCredential(ctx, store.db, id, secret)
 	case "delete":
 		result, err := store.db.ExecContext(ctx, `DELETE FROM subscription_credentials WHERE service_id = ?`, id)
 		if err != nil {
@@ -275,4 +262,21 @@ ON CONFLICT(service_id) DO UPDATE SET credential_value = excluded.credential_val
 		}
 		return store.openSecret(subscriptionCredentialsTable, string(id), stored, true)
 	}
+}
+
+func (store *Store) putSubscriptionCredential(ctx context.Context, executor execer, id contract.ServiceID, secret []byte) error {
+	if len(secret) == 0 || len(secret) > maxSubscriptionCredentialLen {
+		return fmt.Errorf("%w: subscription credential must contain 1 to %d bytes", storagecontract.ErrInvalidArgument, maxSubscriptionCredentialLen)
+	}
+	sealed, err := store.keys.sealColumn(subscriptionCredentialsTable, string(id), secret)
+	if err != nil {
+		return fmt.Errorf("seal subscription credential: %w", err)
+	}
+	if _, err := executor.ExecContext(ctx, `INSERT INTO subscription_credentials (service_id, credential_value, updated_at)
+VALUES (?, ?, ?)
+ON CONFLICT(service_id) DO UPDATE SET credential_value = excluded.credential_value, updated_at = excluded.updated_at`,
+		id, sealed, store.now().UTC().Format(time.RFC3339Nano)); err != nil {
+		return fmt.Errorf("write subscription credential: %w", err)
+	}
+	return nil
 }
